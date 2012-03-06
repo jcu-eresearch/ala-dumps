@@ -44,7 +44,7 @@ def _retry(tries=3, delay=2, backoff=2):
 
 
 @_retry()
-def _fetchJson(url, params=False, use_get=False):
+def _fetch_json(url, params=False, use_get=False):
     """Opens the url and returns the result of urllib2.urlopen"""
 
     if params:
@@ -58,15 +58,30 @@ def _fetchJson(url, params=False, use_get=False):
     else:
         response = urllib2.urlopen(url)
 
-    return json.read(response)
+    return_value = json.load(response)
+    if len(return_value) == 0:
+        throw RuntimeError('ALA returned empty response')
+    else:
+        return return_value
+
+
+def _is_record_json_valid_for_modelling(record):
+    #TODO: get list of assertions from Jeremy to check here
+    return True
 
 
 def records_for_species(species_lsid):
-    """A generator for OccurrenceRecord objects fetched from ALA"""
+    """A generator for OccurrenceRecord objects fetched from ALA
 
-    pageSize = 1000
-    currentPage = 0
+    Could improve speed by fetching all pages in parallel.
+    """
+
+    # uses 'occurrences/search' instead of 'occurrences/download' because of the
+    # download limit, which can be bypassed by getting the records one page at
+    # a time
     url = 'http://biocache.ala.org.au/ws/occurrences/search'
+    page_size = 400
+    current_page = 0
     params = [
         ('q', 'lsid:' + species_lsid),
         #maybe use a list of specific assertions instead of geospatial_kosher
@@ -74,28 +89,31 @@ def records_for_species(species_lsid):
         #maybe also include basis_of_record:MachineObservation
         ('fq', 'basis_of_record:HumanObservation'),
         ('facet', 'off'),
-        ('pageSize', pageSize),
+        ('pageSize', page_size),
         #startIndex must be the last param (it is popped off the list later)
         ('startIndex', 0)
     ]
 
     while True:
         params.pop()
-        params.append(('startIndex', currentPage * pageSize))
-        response = _fetchJson(url, params, True)
+        params.append(('startIndex', current_page * page_size))
+        response = _fetch_json(url, params, True)
 
         for occ in response['occurrences']:
-            record = OccurrenceRecord()
-            record.latitude = occ['decimalLatitude']
-            record.longitude = occ['decimalLongitude']
-            record.uuid = occ['uuid']
-            yield record
+            if _is_record_json_valid_for_modelling(occ):
+                record = OccurrenceRecord()
+                record.latitude = occ['decimalLatitude']
+                record.longitude = occ['decimalLongitude']
+                record.uuid = occ['uuid']
+                record.species_lsid = occ['taxonConceptID']
+                record.species_scientific_name = occ['scientificName']
+                yield record
 
-        totalPages = math.ceil(
-                float(response['totalRecords']) / float(pageSize))
+        total_pages = math.ceil(
+                float(response['totalRecords']) / float(page_size))
 
-        currentPage += 1
-        if currentPage >= totalPages:
+        current_page += 1
+        if current_page >= total_pages:
             break
 
 
@@ -103,12 +121,15 @@ class OccurrenceRecord(object):
     """Plain old data structure for an occurrence record"""
 
     def __init__(self):
-        self.latitude = 0.0
-        self.longitude = 0.0
+        self.latitude = None
+        self.longitude = None
         self.uuid = None
+        self.species_lsid = None
+        self.species_scientific_name = None
 
     def __repr__(self):
-        return '<record uuid="{uuid}" latLong="{lat}, {lng}" />'.format(
+        return '<record species="{species}" uuid="{uuid}" latLong="{lat}, {lng}" />'.format(
+                species=self.species_scientific_name,
                 uuid=self.uuid,
                 lat=self.latitude,
                 lng=self.longitude)
