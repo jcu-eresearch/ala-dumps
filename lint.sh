@@ -1,1 +1,4 @@
-pep8 --count --show-source --show-pep8 ala.py | less
+IFS=$'\n'
+for FILENAME in $(find . -iname "*.py") ; do
+  pep8 --count --show-source "$FILENAME"
+done
