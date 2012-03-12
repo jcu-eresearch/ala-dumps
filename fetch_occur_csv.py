@@ -44,16 +44,16 @@ bd08-6536a53abec9
 
     args.add_argument('--strategy', type=str, nargs=1,
             choices=['search', 'facet', 'download'], default=['facet'],
-            help='''There are three ways to get occurrence records from ALA:
-            'search' uses the 'occurrences/search' web service, which is high
-            on bandwidth (1.5kb per record). 'facet' uses the
-            'occurrences/facet/download' web service, which is low on bandwidth
-            but does not contain any record information except the lat/long.
-            'download' uses the 'occurrences/download' web service, which is
-            very low on bandwidth (250kb for 30k records) but ALA servers can't
-            generate the data fast enough (max download speed is about 8kb/s).
-            This argument will probably be removed once the best strategy is
-            clear.''')
+            help='''Default is 'facet'. There are three ways to get occurrence
+            records from ALA: 'search' uses the 'occurrences/search' web
+            service, which is high on bandwidth (1.5kb per record). 'facet'
+            uses the 'occurrences/facet/download' web service, which is low on
+            bandwidth but does not contain any record information except the
+            lat/long.  'download' uses the 'occurrences/download' web service,
+            which is very low on bandwidth (250kb for 30k records) but ALA
+            servers can't generate the data fast enough (max download speed is
+            about 8kb/s).  This argument will probably be removed once the best
+            strategy is clear.''')
 
     return args.parse_args()
 

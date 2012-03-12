@@ -115,11 +115,6 @@ def _fetch(url, params=False, use_get=False):
     return _request(url, params, use_get)
 
 
-def _is_record_json_valid_for_modelling(record):
-    #TODO: get list of assertions from Jeremy to check here
-    return True
-
-
 def _chunked_read_and_write(infile, outfile, log):
     chunk_size = 4096
     report_interval = 5.0
@@ -205,7 +200,16 @@ def _downloadzip_records_for_species(species_lsid, log):
     temp_zip_file.close()
 
 
+def _scientific_name_for_lsid(species_lsid):
+    guid = urllib.quote(species_lsid)
+    url = 'http://bie.ala.org.au/species/shortProfile/{0}.json'.format(guid)
+    info, size = _fetch_json(url, False, True)
+    return info['scientificName']
+
+
 def _facet_records_for_species(species_lsid, log):
+    scientific_name = _scientific_name_for_lsid(species_lsid)
+
     url = 'http://biocache.ala.org.au/ws/occurrences/facets/download'
     params = (
         ('q', 'lsid:' + species_lsid),
@@ -229,7 +233,7 @@ def _facet_records_for_species(species_lsid, log):
 
     for row in reader:
         record = OccurrenceRecord()
-        record.species_scientific_name = 'Dunno bro'
+        record.species_scientific_name = scientific_name
         record.latitude = float(row[0])
         record.longitude = float(row[1])
         count = int(row[2])
@@ -273,15 +277,14 @@ def _search_records_for_species(species_lsid, log):
         num_records = 0
         t = time.time()
         for occ in response['occurrences']:
-            if _is_record_json_valid_for_modelling(occ):
-                record = OccurrenceRecord()
-                record.latitude = occ['decimalLatitude']
-                record.longitude = occ['decimalLongitude']
-                record.uuid = occ['uuid']
-                record.species_lsid = occ['taxonConceptID']
-                record.species_scientific_name = occ['scientificName']
-                yield record
-                num_records += 1
+            record = OccurrenceRecord()
+            record.latitude = occ['decimalLatitude']
+            record.longitude = occ['decimalLongitude']
+            record.uuid = occ['uuid']
+            record.species_lsid = occ['taxonConceptID']
+            record.species_scientific_name = occ['scientificName']
+            yield record
+            num_records += 1
         t = time.time() - t
         log.info('Iterated over %d records in %0.2f seconds (%0.2f records/s)',
                  num_records, t, float(num_records) / t)
