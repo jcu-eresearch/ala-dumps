@@ -87,12 +87,12 @@ def _retry(tries=3, delay=2, backoff=2):
     return deco_retry
 
 
-def _request(url, params=False, use_get=False):
+def _request(url, params=None, use_get=True):
     if params:
         params = urllib.urlencode(params)
         if use_get:
             url += '?' + params
-            params = False
+            params = None
 
     if params:
         return urllib2.urlopen(url, params)
@@ -101,20 +101,20 @@ def _request(url, params=False, use_get=False):
 
 
 @_retry()
-def _fetch_json(url, params=False, use_get=False):
+def _fetch_json(url, params=None, check_not_empty=True, use_get=True):
     """Opens the url and returns the result of urllib2.urlopen"""
 
     response = _request(url, params, use_get)
     response_str = response.read()
     return_value = json.loads(response_str)
-    if len(return_value) == 0:
+    if check_not_empty and len(return_value) == 0:
         raise RuntimeError('ALA returned empty response')
     else:
         return return_value, len(response_str)
 
 
 @_retry()
-def _fetch(url, params=False, use_get=False):
+def _fetch(url, params=None, use_get=True):
     return _request(url, params, use_get)
 
 
@@ -169,7 +169,7 @@ def _downloadzip_records_for_species(species_lsid):
     #need to write zip file to a temp file
     log.info('Requesting zip file from ALA...')
     t = time.time()
-    response = _fetch(url, params, True)
+    response = _fetch(url, params)
     log.info('Response headers received after %0.2f seconds', time.time() - t)
 
     log.info('Downloading zip file...')
@@ -206,14 +206,20 @@ def _downloadzip_records_for_species(species_lsid):
 def _scientific_name_for_lsid(species_lsid):
     guid = urllib.quote(species_lsid)
     url = 'http://bie.ala.org.au/species/shortProfile/{0}.json'.format(guid)
-    info, size = _fetch_json(url, False, True)
-    return info['scientificName']
+    info, size = _fetch_json(url, check_not_empty=False)
+    if not info or len(info) == 0:
+        return None
+    else:
+        return info['scientificName']
 
 
 def lsid_for_species_scientific_name(scientific_name):
     url = 'http://bie.ala.org.au/ws/guid/' + urllib.quote(scientific_name)
-    info, size = _fetch_json(url, False, True)
-    return info[0]['identifier']
+    info, size = _fetch_json(url, check_not_empty=False)
+    if not info or len(info) == 0:
+        return None
+    else:
+        return info[0]['identifier']
 
 
 def _facet_records_for_species(species_lsid):
@@ -230,7 +236,7 @@ def _facet_records_for_species(species_lsid):
 
     log.info('Requesting csv..')
     t = time.time()
-    response = _fetch(url, params, True)
+    response = _fetch(url, params)
     log.info('Received response headers after %0.2f seconds', time.time() - t)
 
     reader = csv.reader(response)
@@ -275,7 +281,7 @@ def _search_records_for_species(species_lsid):
         params.append(('startIndex', current_page * page_size))
 
         t = time.time()
-        response, response_size = _fetch_json(url, params, True)
+        response, response_size = _fetch_json(url, params)
         t = time.time() - t
         log.info('Received page %d, sized %0.2fkb in %0.2f secs (%0.2fkb/sec)',
                 current_page + 1,
