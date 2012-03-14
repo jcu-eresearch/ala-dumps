@@ -11,6 +11,9 @@ import csv
 import shutil
 import zipfile
 import time
+import logging
+
+log = logging.getLogger(__name__)
 
 
 class OccurrenceRecord(object):
@@ -34,15 +37,15 @@ class OccurrenceRecord(object):
                 lng=self.longitude)
 
 
-def records_for_species(species_lsid, strategy, log):
+def records_for_species(species_lsid, strategy):
     """A generator for OccurrenceRecord objects fetched from ALA"""
 
     if strategy == 'search':
-        return _search_records_for_species(species_lsid, log)
+        return _search_records_for_species(species_lsid)
     elif strategy == 'download':
-        return _downloadzip_records_for_species(species_lsid, log)
+        return _downloadzip_records_for_species(species_lsid)
     elif strategy == 'facet':
-        return _facet_records_for_species(species_lsid, log)
+        return _facet_records_for_species(species_lsid)
     else:
         raise ValueError('Invalid strategy: ' + strategy)
 
@@ -115,7 +118,7 @@ def _fetch(url, params=False, use_get=False):
     return _request(url, params, use_get)
 
 
-def _chunked_read_and_write(infile, outfile, log):
+def _chunked_read_and_write(infile, outfile):
     chunk_size = 4096
     report_interval = 5.0
     last_report_time = time.time()
@@ -141,7 +144,7 @@ def _chunked_read_and_write(infile, outfile, log):
             bytes_read_this_interval = 0
 
 
-def _downloadzip_records_for_species(species_lsid, log):
+def _downloadzip_records_for_species(species_lsid):
     '''Uses /occurrence/download for maximum speed (gets a single zip file) but
     this is may be problematic due to limits on the number of occurrence
     records downloaded. Was told that the limits currently only apply to fauna,
@@ -207,7 +210,7 @@ def _scientific_name_for_lsid(species_lsid):
     return info['scientificName']
 
 
-def _facet_records_for_species(species_lsid, log):
+def _facet_records_for_species(species_lsid):
     scientific_name = _scientific_name_for_lsid(species_lsid)
 
     url = 'http://biocache.ala.org.au/ws/occurrences/facets/download'
@@ -241,7 +244,7 @@ def _facet_records_for_species(species_lsid, log):
             yield record
 
 
-def _search_records_for_species(species_lsid, log):
+def _search_records_for_species(species_lsid):
     '''Can be slow. Could improve speed by fetching all pages in parallel
     instead of serially. Use the function records_for_species instead - see the
     documentation for details.'''

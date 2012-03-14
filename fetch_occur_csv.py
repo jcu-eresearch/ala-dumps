@@ -8,6 +8,7 @@ import logging
 import logging.handlers
 import time
 
+log = logging.getLogger()
 
 def parse_args():
     args = argparse.ArgumentParser(
@@ -74,14 +75,14 @@ def spp_code_for_species_name(species_name):
         return filtered.strip()[:8]
 
 
-def write_csv_for_species_lsid(species_lsid, strategy, log):
+def write_csv_for_species_lsid(species_lsid, strategy):
     writer = csv.writer(sys.stdout)
     writer.writerow(['SPPCODE', 'LATDEC', 'LONGDEC'])
     sppCode = None
 
     t = time.time()
     num_records = 0
-    for record in ala.records_for_species(species_lsid, strategy, log):
+    for record in ala.records_for_species(species_lsid, strategy):
         if sppCode is None:
             sppCode = spp_code_for_species_name(record.species_scientific_name)
         writer.writerow([sppCode, record.latitude, record.longitude])
@@ -93,8 +94,7 @@ def write_csv_for_species_lsid(species_lsid, strategy, log):
 
 if __name__ == '__main__':
     args = parse_args()
-    log = logging.getLogger('loggy')
     if args.speed_info:
         log.setLevel(logging.INFO)
         log.addHandler(logging.StreamHandler())
-    write_csv_for_species_lsid(args.lsid[0], args.strategy[0], log)
+    write_csv_for_species_lsid(args.lsid[0], args.strategy[0])
