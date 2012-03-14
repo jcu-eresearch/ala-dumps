@@ -210,6 +210,12 @@ def _scientific_name_for_lsid(species_lsid):
     return info['scientificName']
 
 
+def lsid_for_species_scientific_name(scientific_name):
+    url = 'http://bie.ala.org.au/ws/guid/' + urllib.quote(scientific_name)
+    info, size = _fetch_json(url, False, True)
+    return info[0]['identifier']
+
+
 def _facet_records_for_species(species_lsid):
     scientific_name = _scientific_name_for_lsid(species_lsid)
 
