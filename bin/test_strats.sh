@@ -24,7 +24,8 @@ if [ $# -eq 1 ] ; then
   mkdir -p data
   test_strat 'facet' $1
   test_strat 'search' $1
-  test_strat 'download' $1
+  #download strategy sucks. by far the slowest.
+  #test_strat 'download' $1
 else
   echo "Usage: $0 LSID"
 fi

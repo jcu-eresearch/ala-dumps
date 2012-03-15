@@ -41,7 +41,7 @@ if __name__ == '__main__':
         species.insert().execute(name='Motacilla flava')
 
         # Powerful Owl
-        species.insert().execute(name='Ninox (Rhabdoglaux) strenua')
+        species.insert().execute(name='Ninox strenua')
 
         # Grey Falcon
-        species.insert().execute(name='Falco (Hierofalco) hypoleucos')
+        species.insert().execute(name='Falco hypoleucos')

@@ -1,4 +1,5 @@
 import time
+import re
 import math
 import urllib
 import urllib2
@@ -13,32 +14,31 @@ import zipfile
 import time
 import logging
 
+
+#occurrence records per request for 'search' strategy
+PAGE_SIZE = 1000
+
+
 log = logging.getLogger(__name__)
 
 
 class OccurrenceRecord(object):
-    """Plain old data structure for an occurrence record"""
+    '''Plain old data structure for an occurrence record'''
 
     def __init__(self):
         self.latitude = None
         self.longitude = None
         self.uuid = None
-        self.species_lsid = None
-        self.species_scientific_name = None
 
     def __repr__(self):
-        return (
-            '<record species="{species}" ' +
-            'uuid="{uuid}" ' +
-            'latLong="{lat}, {lng}" />').format(
-                species=self.species_scientific_name,
-                uuid=self.uuid,
-                lat=self.latitude,
-                lng=self.longitude)
+        return '<record uuid="{uuid} latLong="{lat}, {lng}" />'.format(
+            uuid=self.uuid,
+            lat=self.latitude,
+            lng=self.longitude)
 
 
 def records_for_species(species_lsid, strategy):
-    """A generator for OccurrenceRecord objects fetched from ALA"""
+    '''A generator for OccurrenceRecord objects fetched from ALA'''
 
     if strategy == 'search':
         return _search_records_for_species(species_lsid)
@@ -50,24 +50,52 @@ def records_for_species(species_lsid, strategy):
         raise ValueError('Invalid strategy: ' + strategy)
 
 
+def species_scientific_name_for_lsid(species_lsid):
+    '''Fetches the scientific name of a species from its LSID'''
+
+    guid = urllib.quote(species_lsid)
+    url = 'http://bie.ala.org.au/species/shortProfile/{0}.json'.format(guid)
+    info, size = _fetch_json(url, check_not_empty=False)
+    if not info or len(info) == 0:
+        return None
+    else:
+        return info['scientificName']
+
+
+def lsid_for_species_scientific_name(scientific_name):
+    '''Fetches the LSID of a species from its scientific name.
+
+    If you were to take the lsid this function returns, and get the species
+    name from the lsid, it may not be the same species name. This is because
+    species names can change, and ALA will map old incorrect names to new
+    correct names.'''
+
+    url = 'http://bie.ala.org.au/ws/guid/' + urllib.quote(scientific_name)
+    info, size = _fetch_json(url, check_not_empty=False)
+    if not info or len(info) == 0:
+        return None
+    else:
+        return info[0]['identifier']
+
+
 def _retry(tries=3, delay=2, backoff=2):
-    """A decorator that retries a function or method until it succeeds (no
-    exception is raised).
+    '''A decorator that retries a function or method until it succeeds (success
+    is when the function completes and no exception is raised).
 
     delay sets the initial delay in seconds, and backoff sets the factor by
     which the delay should lengthen after each failure. backoff must be greater
     than 1, or else it isn't really a backoff. tries must be at least 1, and
-    delay greater than 0."""
+    delay greater than 0.'''
 
     if backoff <= 1:
-        raise ValueError("backoff must be greater than 1")
+        raise ValueError('backoff must be greater than 1')
 
     tries = math.floor(tries)
     if tries < 1:
-        raise ValueError("tries must be >= 1")
+        raise ValueError('tries must be >= 1')
 
     if delay <= 0:
-        raise ValueError("delay must be >= 0")
+        raise ValueError('delay must be >= 0')
 
     def deco_retry(f):
         def f_retry(*args, **kwargs):
@@ -88,6 +116,7 @@ def _retry(tries=3, delay=2, backoff=2):
 
 
 def _request(url, params=None, use_get=True):
+    '''URL encodes params and fetches the url via GET or POST'''
     if params:
         params = urllib.urlencode(params)
         if use_get:
@@ -102,7 +131,10 @@ def _request(url, params=None, use_get=True):
 
 @_retry()
 def _fetch_json(url, params=None, check_not_empty=True, use_get=True):
-    """Opens the url and returns the result of urllib2.urlopen"""
+    '''Fetches and parses the JSON at the given url.
+
+    Returns the object parsed from the JSON, and the size (in bytes) of the
+    JSON text that was fetched'''
 
     response = _request(url, params, use_get)
     response_str = response.read()
@@ -115,10 +147,41 @@ def _fetch_json(url, params=None, check_not_empty=True, use_get=True):
 
 @_retry()
 def _fetch(url, params=None, use_get=True):
+    '''Opens the url and returns the result of urllib2.urlopen'''
     return _request(url, params, use_get)
 
 
+def _query_for_lsid(species_lsid):
+    '''The 'q' parameter for ALA web service queries
+
+    Maybe use a list of specific assertions instead of geospatial_kosher.'''
+
+    return _strip_n_squeeze('''
+
+        lsid:{lsid} AND
+        geospatial_kosher:true AND
+        (
+            basis_of_record:HumanObservation OR
+            basis_of_record:MachineObservation
+        )
+
+        '''.format(lsid=species_lsid))
+
+
+def _strip_n_squeeze(q):
+    r'''Strips and squeezes whitespace. Completely G rated, I'll have you know.
+
+    >>> _strip_n_squeeze('    hello   \n   there my \r\n  \t  friend    \n')
+    'hello there my friend'
+    '''
+
+    return re.sub(r'[\s]+', r' ', q.strip())
+
+
 def _chunked_read_and_write(infile, outfile):
+    '''Reads from infile and writes to outfile in chunks, while logging speed
+    info'''
+
     chunk_size = 4096
     report_interval = 5.0
     last_report_time = time.time()
@@ -145,26 +208,19 @@ def _chunked_read_and_write(infile, outfile):
 
 
 def _downloadzip_records_for_species(species_lsid):
-    '''Uses /occurrence/download for maximum speed (gets a single zip file) but
-    this is may be problematic due to limits on the number of occurrence
-    records downloaded. Was told that the limits currently only apply to fauna,
-    so this shouldn't be a problem for animals. If it is a problem, replace
-    this function with _ala_search_records_for_species, but it will be slower.
-    '''
+    '''This strategy is too slow. The requested file size is small, but ALA
+    can't generate the file fast enough so the download speed won't go above
+    8kb/s'''
 
     file_name = 'data'
     url = 'http://biocache.ala.org.au/ws/occurrences/download'
-    params = (
-        ('q', 'lsid:' + species_lsid),
-        #maybe use a list of specific assertions instead of geospatial_kosher
-        ('fq', 'geospatial_kosher:true'),
-        #maybe also include basis_of_record:MachineObservation
-        ('fq', 'basis_of_record:HumanObservation'),
-        ('fields', 'decimalLatitude.p,decimalLongitude.p,scientificName.p'),
-        ('email', 'tom.dalling@jcu.edu.au'),
-        ('reason', 'testing for AP03 project for JCU'),
-        ('file', file_name)
-    )
+    params = {
+        'q': _query_for_lsid(species_lsid),
+        'fields': 'decimalLatitude.p,decimalLongitude.p,scientificName.p',
+        'email': 'tom.dalling@gmail.au',
+        'reason': 'AP03 project for James Cook University',
+        'file': file_name
+    }
 
     #need to write zip file to a temp file
     log.info('Requesting zip file from ALA...')
@@ -192,7 +248,6 @@ def _downloadzip_records_for_species(species_lsid):
         record = OccurrenceRecord()
         record.latitude = float(row['Latitude - processed'])
         record.longitude = float(row['Longitude - processed'])
-        record.species_scientific_name = row['Matched Scientific Name']
         yield record
         num_records += 1
     t = time.time() - t
@@ -203,36 +258,20 @@ def _downloadzip_records_for_species(species_lsid):
     temp_zip_file.close()
 
 
-def _scientific_name_for_lsid(species_lsid):
-    guid = urllib.quote(species_lsid)
-    url = 'http://bie.ala.org.au/species/shortProfile/{0}.json'.format(guid)
-    info, size = _fetch_json(url, check_not_empty=False)
-    if not info or len(info) == 0:
-        return None
-    else:
-        return info['scientificName']
-
-
-def lsid_for_species_scientific_name(scientific_name):
-    url = 'http://bie.ala.org.au/ws/guid/' + urllib.quote(scientific_name)
-    info, size = _fetch_json(url, check_not_empty=False)
-    if not info or len(info) == 0:
-        return None
-    else:
-        return info[0]['identifier']
-
-
 def _facet_records_for_species(species_lsid):
-    scientific_name = _scientific_name_for_lsid(species_lsid)
+    '''Fastest strategy, but each record only contains latitude and longitude.
+
+    Using the '/occurrences/faces/download' web service, there is no way to get
+    other info about the record, like assertions and the record uuid. If
+    bandwidth wasn't an issue, the 'search' strategy may be just as fast as
+    this one.'''
 
     url = 'http://biocache.ala.org.au/ws/occurrences/facets/download'
-    params = (
-        ('q', 'lsid:' + species_lsid),
-        ('fq', 'basis_of_record:HumanObservation'),
-        ('fq', 'geospatial_kosher:true'),
-        ('facets', 'lat_long'),
-        ('count', 'true')
-    )
+    params = {
+        'q': _query_for_lsid(species_lsid),
+        'facets': 'lat_long',
+        'count': 'true'
+    }
 
     log.info('Requesting csv..')
     t = time.time()
@@ -246,67 +285,64 @@ def _facet_records_for_species(species_lsid):
     if count_heading != 'Count':
         raise RuntimeError('Unexpected heading for count')
 
+    num_records = 0
     for row in reader:
         record = OccurrenceRecord()
-        record.species_scientific_name = scientific_name
         record.latitude = float(row[0])
         record.longitude = float(row[1])
         count = int(row[2])
         for i in range(count):
             yield record
+            num_records += 1
+            if num_records % 1000 == 0:
+                log.info('%d records done...', num_records)
 
 
 def _search_records_for_species(species_lsid):
-    '''Can be slow. Could improve speed by fetching all pages in parallel
-    instead of serially. Use the function records_for_species instead - see the
-    documentation for details.'''
+    '''Currently the best strategy.
+
+    Faster than 'download' strategy. More info about each record than 'facet'
+    strategy.
+
+    Speed could maybe be improved by fetching every page concurrently, instead
+    of serially.'''
 
     url = 'http://biocache.ala.org.au/ws/occurrences/search'
-    page_size = 1000
-    current_page = 0
-    params = [
-        ('q', 'lsid:' + species_lsid),
-        #maybe use a list of specific assertions instead of geospatial_kosher
-        ('fq', 'geospatial_kosher:true'),
-        #maybe also include basis_of_record:MachineObservation
-        ('fq', 'basis_of_record:HumanObservation'),
-        ('facet', 'off'),
-        ('pageSize', page_size),
-        #startIndex must be the last param (it is popped off the list later)
-        ('startIndex', 0)
-    ]
+    params = {
+        'q': _query_for_lsid(species_lsid),
+        'fl': 'id,latitude,longitude',
+        'facet': 'off',
+        'pageSize': PAGE_SIZE,
+    }
 
+    current_page = 0
     while True:
-        params.pop()
-        params.append(('startIndex', current_page * page_size))
+        params['startIndex'] = current_page * PAGE_SIZE
 
         t = time.time()
         response, response_size = _fetch_json(url, params)
         t = time.time() - t
-        log.info('Received page %d, sized %0.2fkb in %0.2f secs (%0.2fkb/sec)',
+        log.info('Received page %d, sized %0.2fkb in %0.2f secs (%0.2fkb/s)',
                 current_page + 1,
                 float(response_size) / 1024.0,
                 t,
                 float(response_size) / 1024.0 / t)
 
-        num_records = 0
-        t = time.time()
         for occ in response['occurrences']:
             record = OccurrenceRecord()
             record.latitude = occ['decimalLatitude']
             record.longitude = occ['decimalLongitude']
             record.uuid = occ['uuid']
-            record.species_lsid = occ['taxonConceptID']
-            record.species_scientific_name = occ['scientificName']
             yield record
-            num_records += 1
-        t = time.time() - t
-        log.info('Iterated over %d records in %0.2f seconds (%0.2f records/s)',
-                 num_records, t, float(num_records) / t)
 
         total_pages = math.ceil(
-                float(response['totalRecords']) / float(page_size))
+                float(response['totalRecords']) / float(PAGE_SIZE))
 
         current_page += 1
         if current_page >= total_pages:
             break
+
+
+if __name__ == "__main__":
+    import doctest
+    doctest.testmod()

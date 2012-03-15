@@ -51,8 +51,8 @@ bd08-6536a53abec9
             finding bottlenecks and such.''')
 
     args.add_argument('--strategy', type=str, nargs=1,
-            choices=['search', 'facet', 'download'], default=['facet'],
-            help='''Default is 'facet'. There are three ways to get occurrence
+            choices=['search', 'facet', 'download'], default=['search'],
+            help='''Default is 'search'. There are three ways to get occurrence
             records from ALA: 'search' uses the 'occurrences/search' web
             service, which is high on bandwidth (1.5kb per record). 'facet'
             uses the 'occurrences/facet/download' web service, which is low on
@@ -83,15 +83,14 @@ def spp_code_for_species_name(species_name):
 
 
 def write_csv_for_species_lsid(species_lsid, strategy):
-    writer = csv.writer(sys.stdout)
-    writer.writerow(['SPPCODE', 'LATDEC', 'LONGDEC'])
-    sppCode = None
+    scientific_name = ala.species_scientific_name_for_lsid(species_lsid)
+    sppCode = spp_code_for_species_name(scientific_name)
 
     t = time.time()
     num_records = 0
+    writer = csv.writer(sys.stdout)
+    writer.writerow(['SPPCODE', 'LATDEC', 'LONGDEC'])
     for record in ala.records_for_species(species_lsid, strategy):
-        if sppCode is None:
-            sppCode = spp_code_for_species_name(record.species_scientific_name)
         writer.writerow([sppCode, record.latitude, record.longitude])
         num_records += 1
     t = time.time() - t
