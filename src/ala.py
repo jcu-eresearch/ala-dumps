@@ -176,7 +176,7 @@ def _downloadzip_records_for_species(species_lsid):
     log.debug('Response headers: %s', dict(response.info()))
     temp_zip_file = tempfile.TemporaryFile()
     t = time.time()
-    _chunked_read_and_write(response, temp_zip_file, log)
+    _chunked_read_and_write(response, temp_zip_file)
     t = time.time() - t
     zip_file_size_kb = float(temp_zip_file.tell()) / 1024.0
     log.info('Fetched %0.2fkb zip file in %0.2f seconds (%0.2f kb/s)',

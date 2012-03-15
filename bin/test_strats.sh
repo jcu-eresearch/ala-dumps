@@ -1,8 +1,17 @@
 #!/bin/bash
 
+BIN_DIR="$(dirname "$0")"
+
 test_strat() {
   echo "Testing strategy: $1"
-  python fetch_occur_csv.py --speed-info --strategy "$1" "$2" > "data/$1-output.csv" 2> "data/$1-info.txt"
+
+  python "$BIN_DIR/fetch_occur_csv.py" \
+    --speed-info \
+    --strategy "$1" \
+    "$2" \
+    > "data/$1-output.csv" \
+    2> "data/$1-info.txt"
+
   if [ $? -eq 0 ] ; then
     wc -l "data/$1-output.csv"
   else
