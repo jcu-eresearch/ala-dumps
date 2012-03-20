@@ -78,6 +78,16 @@ def lsid_for_species_scientific_name(scientific_name):
         return info[0]['identifier']
 
 
+def num_records_for_lsid(lsid):
+    url = 'http://biocache.ala.org.au/ws/occurrences/search'
+    params = {
+        'q': _query_for_lsid(lsid),
+        'facet': 'off',
+        'pageSize': 0
+    }
+    j = _fetch_json(url, params)
+    return j[0]['totalRecords']
+
 def _retry(tries=3, delay=2, backoff=2):
     '''A decorator that retries a function or method until it succeeds (success
     is when the function completes and no exception is raised).
