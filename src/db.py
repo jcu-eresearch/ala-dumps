@@ -1,47 +1,84 @@
 #!/usr/bin/python
 
 import sys
-from sqlalchemy import create_engine, Table, Column, Integer, String, MetaData
-from sqlalchemy import ForeignKey, DateTime, Sequence, Numeric, sql
+from sqlalchemy import \
+    create_engine, MetaData, Table, Column, ForeignKey, INT, \
+    PrimaryKeyConstraint, Index
+from sqlalchemy.dialects.mysql import \
+    SMALLINT, TINYINT, ENUM, VARCHAR, DATETIME, FLOAT, BINARY, TEXT
 
-engine = create_engine('sqlite:///db.sqlite3')
+engine = create_engine('mysql://ap03:ap03@localhost/ap03')
 metadata = MetaData()
 metadata.bind = engine
 
 species = Table('species', metadata,
-    Column('id', Integer, primary_key=True),
-    Column('name', String),
-    Column('created', DateTime, default=sql.functions.now()),
-    Column('modified', DateTime, default=sql.functions.now())
+    Column('id', SMALLINT(unsigned=True), primary_key=True),
+    Column('scientific_name', VARCHAR(256), nullable=False),
+    Column('common_name', VARCHAR(256), nullable=False)
+)
+
+sources = Table('sources', metadata,
+    Column('id', TINYINT(unsigned=True), primary_key=True),
+    Column('name', VARCHAR(256), nullable=False),
+    Column('last_import_time', DATETIME(), nullable=True)
 )
 
 occurrences = Table('occurrences', metadata,
-    Column('id', Integer, primary_key=True),
-    Column('species_id', None, ForeignKey('species.id')),
-    Column('latitude', Numeric(12, 9)),
-    Column('longitude', Numeric(12, 9)),
-    Column('created', DateTime, default=sql.functions.now()),
-    Column('modified', DateTime, default=sql.functions.now())
+    Column('id', INT(unsigned=True), primary_key=True),
+    Column('latitude', FLOAT(), nullable=False),
+    Column('longitude', FLOAT(), nullable=False),
+    Column('rating', ENUM('good', 'suspect', 'bad'), nullable=False),
+    Column('species_id', SMALLINT(unsigned=True), ForeignKey('species.id'),
+        nullable=False),
+    Column('source_id', TINYINT(unsigned=True), ForeignKey('sources.id'),
+        nullable=False),
+    Column('source_record_id', BINARY(16), nullable=True),
+
+    Index('idx_species_id', 'species_id'),
+
+    mysql_engine='MyISAM'
 )
 
+users = Table('users', metadata,
+    Column('id', INT(unsigned=True), primary_key=True),
+    Column('email', VARCHAR(256), nullable=False)
+)
+
+ratings = Table('ratings', metadata,
+    Column('id', INT(unsigned=True), primary_key=True),
+    Column('user_id', INT(unsigned=True), ForeignKey('users.id'),
+        nullable=False),
+    Column('comment', TEXT(), nullable=False),
+    Column('rating', ENUM('good', 'suspect', 'bad'), nullable=False)
+)
+
+occurrences_ratings_bridge = Table('occurrences_ratings_bridge', metadata,
+    Column('occurrence_id', INT(unsigned=True), nullable=False),
+    Column('rating_id', INT(unsigned=True), nullable=False),
+
+    PrimaryKeyConstraint('occurrence_id', 'rating_id')
+)
+
+
 if __name__ == '__main__':
-    if '--debug-remake' in sys.argv:
-        metadata.drop_all()
-        metadata.create_all()
-
     if '--debug-populate' in sys.argv:
-        # This is an old name for 'Cracticus tibicen', which is the Australian
-        # Mapie. Previously they were thought to be two separate species, but
-        # they are now all classified as 'Cracticus tibicen'
+        # This is an old name for 'Cracticus tibicen'. Previously they were
+        # thought to be two separate species, but they are now all classified
+        # as 'Cracticus tibicen'.
         #
-        # WARNING: ALA has about 350,000 records for 'Cracticus tibicen'
-        species.insert().execute(name='Gymnorhina tibicen')
+        # WARNING: ALA has about 350,000 occurrences for this species
+        species.insert().execute(
+            scientific_name='Gymnorhina tibicen',
+            common_name='Australian Magpie')
 
-        # Yellow Wagtail
-        species.insert().execute(name='Motacilla flava')
+        species.insert().execute(
+            scientific_name='Motacilla flava',
+            common_name='Yellow Wagtail')
 
-        # Powerful Owl
-        species.insert().execute(name='Ninox strenua')
+        species.insert().execute(
+            scientific_name='Ninox strenua',
+            common_name='Powerful Owl')
 
-        # Grey Falcon
-        species.insert().execute(name='Falco hypoleucos')
+        species.insert().execute(
+            scientific_name='Falco hypoleucos',
+            common_name='Grey Falcon')

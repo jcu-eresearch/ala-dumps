@@ -13,7 +13,7 @@
 --     ENUM takes up 1 byte if there are less than 255 values
 
 
--- Each species has many records, and each record belongs to one species.
+-- Each species has many occurrences, and each occurrence belongs to one species.
 CREATE TABLE IF NOT EXISTS `species` (
     `id` SMALLINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
     `scientific_name` VARCHAR(256) NOT NULL,
@@ -21,8 +21,8 @@ CREATE TABLE IF NOT EXISTS `species` (
 );
 
 
--- Each row represents a data source of records (e.g. ALA).
--- Each source has many records, and each record belongs to one source.
+-- Each row represents a data source of occurrences (e.g. ALA).
+-- Each source has many occurrences, and each occurrence belongs to one source.
 CREATE TABLE IF NOT EXISTS `sources` (
     `id` TINYINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
     `name` VARCHAR(256) NOT NULL
@@ -34,27 +34,27 @@ CREATE TABLE IF NOT EXISTS `sources` (
 
 -- Each row is an occurrence record.
 --
--- This table will hold around 16 million records from ALA alone, 
+-- This table will hold around 16 million occurrences from ALA alone,
 -- so this table should have as few columns as possible.
 --
 -- Maybe add a "has_user_ratings" column as an optimisation, so that
 -- you don't have to make a separate query to find out if the
--- record has any user ratings.
+-- occurrence has any user ratings.
 --
 -- TODO: find out how precise lat/longs need to be (float or double)
-CREATE TABLE IF NOT EXISTS `records` (
+CREATE TABLE IF NOT EXISTS `occurrences` (
     `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
     `latitude` FLOAT NOT NULL,
     `longitude` FLOAT NOT NULL,
     `rating` ENUM('good','suspect','bad') NOT NULL,
     `species_id` SMALLINT UNSIGNED NOT NULL
         COMMENT 'foreign key to species.id',
-    `source_id` TINYINT UNSIGNED NOT NULL 
+    `source_id` TINYINT UNSIGNED NOT NULL
         COMMENT 'foreign key to sources.id',
-    `source_record_id` BINARY(16) NULL 
+    `source_record_id` BINARY(16) NULL
         COMMENT 'the id of the record as obtained from the source (e.g. the uuid from ALA).',
-                 
-    INDEX `species_id_index` (species_id)
+
+    INDEX `idx_species_id` (species_id)
 )
 -- MyISAM should theoretically be faster than InnoDB
 -- for tables that are not updated or inserted frequently.
@@ -72,10 +72,10 @@ CREATE TABLE IF NOT EXISTS `users` (
 
 
 -- These are the user ratings (a.k.a vetting information) for
--- occurrence records. ALA has a system of "assertions" that
+-- occurrence occurrences. ALA has a system of "assertions" that
 -- doesn't match up very will to the way we will be rating
--- records. Has a many-to-many relationship with the 'records'
--- table via the 'records_ratings_bridge' table.
+-- occurrences. Has a many-to-many relationship with the 'occurrences'
+-- table via the 'occurrences_ratings_bridge' table.
 CREATE TABLE IF NOT EXISTS `ratings` (
     `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
     `user_id` INT UNSIGNED NOT NULL
@@ -83,15 +83,15 @@ CREATE TABLE IF NOT EXISTS `ratings` (
     `comment` TEXT NOT NULL
         COMMENT 'additional free-form comment supplied by the user',
     `rating` ENUM('good', 'suspect', 'bad') NOT NULL
-        COMMENT 'user supplied rating. same enum as "records.rating"'
+        COMMENT 'user supplied rating. same enum as "occurrences.rating"'
 );
-         
 
--- Bridging table between 'records' and 'ratings'
-CREATE TABLE IF NOT EXISTS `records_ratings_bridge` (
-    `record_id` INT UNSIGNED NOT NULL,
+
+-- Bridging table between 'occurrences' and 'ratings'
+CREATE TABLE IF NOT EXISTS `occurrences_ratings_bridge` (
+    `occurrence_id` INT UNSIGNED NOT NULL,
     `rating_id` INT UNSIGNED NOT NULL,
-    
-    PRIMARY KEY (`record_id`, `rating_id`)
+
+    PRIMARY KEY (`occurrence_id`, `rating_id`)
 )
-COMMENT='Bridging table between "records" and "ratings"';
+COMMENT='Bridging table between "occurrences" and "ratings"';
