@@ -13,12 +13,12 @@ import shutil
 import zipfile
 import time
 import logging
-
-BIE = 'http://bie.ala.org.au/'
-BIOCACHE = 'http://biocache.ala.org.au/'
+from datetime import datetime
 
 #occurrence records per request for 'search' strategy
 PAGE_SIZE = 1000
+BIE = 'http://bie.ala.org.au/'
+BIOCACHE = 'http://biocache.ala.org.au/'
 
 
 log = logging.getLogger(__name__)
@@ -39,15 +39,21 @@ class OccurrenceRecord(object):
             lng=self.longitude)
 
 
-def records_for_species(species_lsid, strategy):
+def records_for_species(species_lsid, strategy, changed_since=None,
+        unchanged_since=None):
     '''A generator for OccurrenceRecord objects fetched from ALA'''
 
+    q = q_param_for_lsid(
+            species_lsid,
+            changed_since=changed_since,
+            unchanged_since=unchanged_since)
+
     if strategy == 'search':
-        return _search_records_for_species(species_lsid)
+        return _search_records_for_species(q)
     elif strategy == 'download':
-        return _downloadzip_records_for_species(species_lsid)
+        return _downloadzip_records_for_species(q)
     elif strategy == 'facet':
-        return _facet_records_for_species(species_lsid)
+        return _facet_records_for_species(q)
     else:
         raise ValueError('Invalid strategy: ' + strategy)
 
@@ -81,13 +87,13 @@ def lsid_for_species_scientific_name(scientific_name):
 
 
 def num_records_for_lsid(lsid):
-    url = BIOCACHE + 'ws/occurrences/search'
-    params = {
-        'q': q_param_for_lsid(lsid),
-        'facet': 'off',
-        'pageSize': 0
-    }
-    j = _fetch_json(create_request(url, params))
+    j = _fetch_json(create_request(
+        BIOCACHE + 'ws/occurrences/search',
+        {
+            'q': q_param_for_lsid(lsid),
+            'facet': 'off',
+            'pageSize': 0
+        }))
     return j[0]['totalRecords']
 
 def create_request(url, params=None, use_get=True):
@@ -151,34 +157,87 @@ def _fetch_json(request, check_not_empty=True):
     else:
         return return_value, len(response_str)
 
-
 @_retry()
 def _fetch(request):
     '''Opens the url and returns the result of urllib2.urlopen'''
     return urllib2.urlopen(request)
 
 
-def q_param_for_lsid(species_lsid, kosher_only=True):
+def q_param_for_lsid(species_lsid, kosher_only=True, changed_since=None,
+        unchanged_since=None):
     '''The 'q' parameter for ALA web service queries
 
+    `changed_since` and `unchanged_since` allow you to only get records that
+    have changed between a certain date range, for example:
+
+        now = datetime.datetime.now()
+        yesterday = ...
+        q_param_for_lsid(..., changed_since=yesterday, unchanged_since=now)
+
+    The `unchanged_since` parameter is specified in case records are changed
+    during the query, in which case they may not be present. If that happens,
+    then you can get the newly changed records the next time:
+
+       old_now = now
+       now = datetime.datetime.now()
+       q_param_for_lsid(..., changed_since=old_now, unchanged_since=now)
+
     Maybe use a list of specific assertions instead of geospatial_kosher.
+
+    Fields possibly useful in incremental updates:
+        modified_date
+        last_processed_date
+        first_loaded_date
+        last_load_date
+        last_assertion_date
     '''
 
     kosher = ''
     if kosher_only:
         kosher = 'geospatial_kosher:true AND'
 
-    return _strip_n_squeeze('''
+    changed_between = ''
+    if changed_since is not None or unchanged_since is not None:
+        daterange = _q_date_range(changed_since, unchanged_since)
+        changed_between = 'last_processed_date:' + daterange
 
+    return _strip_n_squeeze('''
         lsid:{lsid} AND
         {kosher}
+        {changed}
         (
             basis_of_record:HumanObservation OR
             basis_of_record:MachineObservation
         )
+        '''.format(lsid=species_lsid, kosher=kosher, changed=changed_between))
 
-        '''.format(lsid=species_lsid, kosher=kosher))
+def _q_date_range(from_date, to_date):
+    '''Formats a start and end date into a date range string for use in ALA
+    queries
 
+    >>> _q_date_range(datetime(2012, 12, 14, 13, 33, 2), None)
+    '[2012-12-14T13:33:02Z TO *]'
+    '''
+
+    return '[{0} TO {1}]'.format(_q_date(from_date), _q_date(to_date))
+
+def _q_date(d):
+    '''Formats a datetime into a string for use in an ALA date range
+
+    The datetime must be naive (without a tzinfo) and represent a UTC time. It
+    can also be None, indicating 'any date'.
+
+    >>> _q_date(datetime(2012, 12, 14, 13, 33, 2))
+    '2012-12-14T13:33:02Z'
+    >>> _q_date(None)
+    '*'
+    '''
+
+    if d is None:
+        return '*'
+    else:
+        assert d.tzinfo is None
+        return d.replace(microsecond=0).isoformat('T') + 'Z'
 
 def _strip_n_squeeze(q):
     r'''Strips and squeezes whitespace. Completely G rated, I'll have you know.
@@ -219,25 +278,25 @@ def _chunked_read_and_write(infile, outfile):
             bytes_read_this_interval = 0
 
 
-def _downloadzip_records_for_species(species_lsid):
+def _downloadzip_records_for_species(q):
     '''This strategy is too slow. The requested file size is small, but ALA
     can't generate the file fast enough so the download speed won't go above
     8kb/s'''
 
     file_name = 'data'
-    url = BIOCACHE + 'ws/occurrences/download'
-    params = {
-        'q': q_param_for_lsid(species_lsid),
-        'fields': 'decimalLatitude.p,decimalLongitude.p,scientificName.p',
-        'email': 'tom.dalling@gmail.au',
-        'reason': 'AP03 project for James Cook University',
-        'file': file_name
-    }
 
     #need to write zip file to a temp file
     log.info('Requesting zip file from ALA...')
     t = time.time()
-    response = _fetch(create_request(url, params))
+    response = _fetch(create_request(
+        BIOCACHE + 'ws/occurrences/download',
+        {
+            'q': q,
+            'fields': 'decimalLatitude.p,decimalLongitude.p',
+            'email': 'tom.dalling@gmail.au',
+            'reason': 'AP03 project for James Cook University',
+            'file': file_name
+        }))
     log.info('Response headers received after %0.2f seconds', time.time() - t)
 
     log.info('Downloading zip file...')
@@ -270,7 +329,7 @@ def _downloadzip_records_for_species(species_lsid):
     temp_zip_file.close()
 
 
-def _facet_records_for_species(species_lsid):
+def _facet_records_for_species(q):
     '''Fastest strategy, but each record only contains latitude and longitude.
 
     Using the '/occurrences/faces/download' web service, there is no way to get
@@ -278,16 +337,15 @@ def _facet_records_for_species(species_lsid):
     bandwidth wasn't an issue, the 'search' strategy may be just as fast as
     this one.'''
 
-    url = BIOCACHE + 'ws/occurrences/facets/download'
-    params = {
-        'q': q_param_for_lsid(species_lsid),
-        'facets': 'lat_long',
-        'count': 'true'
-    }
-
     log.info('Requesting csv..')
     t = time.time()
-    response = _fetch(create_request(url, params))
+    response = _fetch(create_request(
+        BIOCACHE + 'ws/occurrences/facets/download',
+        {
+            'q': q,
+            'facets': 'lat_long',
+            'count': 'true'
+        }))
     log.info('Received response headers after %0.2f seconds', time.time() - t)
 
     reader = csv.reader(response)
@@ -310,7 +368,7 @@ def _facet_records_for_species(species_lsid):
                 log.info('%d records done...', num_records)
 
 
-def _search_records_for_species(species_lsid):
+def _search_records_for_species(q):
     '''Currently the best strategy.
 
     Faster than 'download' strategy. More info about each record than 'facet'
@@ -321,7 +379,7 @@ def _search_records_for_species(species_lsid):
 
     url = BIOCACHE + 'ws/occurrences/search'
     params = {
-        'q': q_param_for_lsid(species_lsid),
+        'q': q,
         'fl': 'id,latitude,longitude',
         'facet': 'off',
         'pageSize': PAGE_SIZE,

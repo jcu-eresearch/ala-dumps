@@ -48,18 +48,19 @@ if __name__ == '__main__':
 
     logging.root.setLevel(logging.DEBUG)
 
-    import_start_datetime = datetime.utcnow()
     ala_source = db.sources.select().execute(name='ala').fetchone()
+    from_d = ala_source['last_import_time']
+    to_d = datetime.utcnow()
 
     for species, lsid in all_species_with_lsids():
         logging.info('Getting records for %s (%s)', species['common_name'], lsid)
         num_records = 0
-        for record in ala.records_for_species(lsid, 'search'):
+        for record in ala.records_for_species(lsid, 'search', from_d, to_d):
             num_records += 1
             db.occurrences.insert().execute(
                 latitude=record.latitude,
                 longitude=record.longitude,
-                rating='good', #TODO: determing rating
+                rating='good', #TODO: determine rating
                 species_id=species['id'],
                 source_id=ala_source['id'],
                 source_record_id=uuid_hex_to_binary(record.uuid)
@@ -68,4 +69,7 @@ if __name__ == '__main__':
         if num_records == 0:
             logging.warning('Found 0 records for %s', species['common_name'])
 
-    db.sources.update().execute(last_import_time=import_start_datetime)
+    db.sources.update().\
+            where(db.sources.c.id == ala_source['id']).\
+            values(last_import_time=to_d).\
+            execute()
