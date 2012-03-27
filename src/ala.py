@@ -14,6 +14,8 @@ import zipfile
 import time
 import logging
 
+BIE = 'http://bie.ala.org.au/'
+BIOCACHE = 'http://biocache.ala.org.au/'
 
 #occurrence records per request for 'search' strategy
 PAGE_SIZE = 1000
@@ -54,8 +56,8 @@ def species_scientific_name_for_lsid(species_lsid):
     '''Fetches the scientific name of a species from its LSID'''
 
     guid = urllib.quote(species_lsid)
-    url = 'http://bie.ala.org.au/species/shortProfile/{0}.json'.format(guid)
-    info, size = _fetch_json(url, check_not_empty=False)
+    url = BIE + 'species/shortProfile/{0}.json'.format(guid)
+    info, size = _fetch_json(create_request(url), check_not_empty=False)
     if not info or len(info) == 0:
         return None
     else:
@@ -70,8 +72,8 @@ def lsid_for_species_scientific_name(scientific_name):
     species names can change, and ALA will map old incorrect names to new
     correct names.'''
 
-    url = 'http://bie.ala.org.au/ws/guid/' + urllib.quote(scientific_name)
-    info, size = _fetch_json(url, check_not_empty=False)
+    url = BIE + 'ws/guid/' + urllib.quote(scientific_name)
+    info, size = _fetch_json(create_request(url), check_not_empty=False)
     if not info or len(info) == 0:
         return None
     else:
@@ -79,14 +81,24 @@ def lsid_for_species_scientific_name(scientific_name):
 
 
 def num_records_for_lsid(lsid):
-    url = 'http://biocache.ala.org.au/ws/occurrences/search'
+    url = BIOCACHE + 'ws/occurrences/search'
     params = {
-        'q': _query_for_lsid(lsid),
+        'q': q_param_for_lsid(lsid),
         'facet': 'off',
         'pageSize': 0
     }
-    j = _fetch_json(url, params)
+    j = _fetch_json(create_request(url, params))
     return j[0]['totalRecords']
+
+def create_request(url, params=None, use_get=True):
+    '''URL encodes params and into a GET or POST request'''
+    if params is not None:
+        params = urllib.urlencode(params)
+        if use_get:
+            url += '?' + params
+            params = None
+
+    return urllib2.Request(url, params)
 
 def _retry(tries=3, delay=2, backoff=2):
     '''A decorator that retries a function or method until it succeeds (success
@@ -124,29 +136,14 @@ def _retry(tries=3, delay=2, backoff=2):
         return f_retry
     return deco_retry
 
-
-def _request(url, params=None, use_get=True):
-    '''URL encodes params and fetches the url via GET or POST'''
-    if params:
-        params = urllib.urlencode(params)
-        if use_get:
-            url += '?' + params
-            params = None
-
-    if params:
-        return urllib2.urlopen(url, params)
-    else:
-        return urllib2.urlopen(url)
-
-
 @_retry()
-def _fetch_json(url, params=None, check_not_empty=True, use_get=True):
+def _fetch_json(request, check_not_empty=True):
     '''Fetches and parses the JSON at the given url.
 
     Returns the object parsed from the JSON, and the size (in bytes) of the
     JSON text that was fetched'''
 
-    response = _request(url, params, use_get)
+    response = urllib2.urlopen(request)
     response_str = response.read()
     return_value = json.loads(response_str)
     if check_not_empty and len(return_value) == 0:
@@ -156,26 +153,31 @@ def _fetch_json(url, params=None, check_not_empty=True, use_get=True):
 
 
 @_retry()
-def _fetch(url, params=None, use_get=True):
+def _fetch(request):
     '''Opens the url and returns the result of urllib2.urlopen'''
-    return _request(url, params, use_get)
+    return urllib2.urlopen(request)
 
 
-def _query_for_lsid(species_lsid):
+def q_param_for_lsid(species_lsid, kosher_only=True):
     '''The 'q' parameter for ALA web service queries
 
-    Maybe use a list of specific assertions instead of geospatial_kosher.'''
+    Maybe use a list of specific assertions instead of geospatial_kosher.
+    '''
+
+    kosher = ''
+    if kosher_only:
+        kosher = 'geospatial_kosher:true AND'
 
     return _strip_n_squeeze('''
 
         lsid:{lsid} AND
-        geospatial_kosher:true AND
+        {kosher}
         (
             basis_of_record:HumanObservation OR
             basis_of_record:MachineObservation
         )
 
-        '''.format(lsid=species_lsid))
+        '''.format(lsid=species_lsid, kosher=kosher))
 
 
 def _strip_n_squeeze(q):
@@ -223,9 +225,9 @@ def _downloadzip_records_for_species(species_lsid):
     8kb/s'''
 
     file_name = 'data'
-    url = 'http://biocache.ala.org.au/ws/occurrences/download'
+    url = BIOCACHE + 'ws/occurrences/download'
     params = {
-        'q': _query_for_lsid(species_lsid),
+        'q': q_param_for_lsid(species_lsid),
         'fields': 'decimalLatitude.p,decimalLongitude.p,scientificName.p',
         'email': 'tom.dalling@gmail.au',
         'reason': 'AP03 project for James Cook University',
@@ -235,7 +237,7 @@ def _downloadzip_records_for_species(species_lsid):
     #need to write zip file to a temp file
     log.info('Requesting zip file from ALA...')
     t = time.time()
-    response = _fetch(url, params)
+    response = _fetch(create_request(url, params))
     log.info('Response headers received after %0.2f seconds', time.time() - t)
 
     log.info('Downloading zip file...')
@@ -276,16 +278,16 @@ def _facet_records_for_species(species_lsid):
     bandwidth wasn't an issue, the 'search' strategy may be just as fast as
     this one.'''
 
-    url = 'http://biocache.ala.org.au/ws/occurrences/facets/download'
+    url = BIOCACHE + 'ws/occurrences/facets/download'
     params = {
-        'q': _query_for_lsid(species_lsid),
+        'q': q_param_for_lsid(species_lsid),
         'facets': 'lat_long',
         'count': 'true'
     }
 
     log.info('Requesting csv..')
     t = time.time()
-    response = _fetch(url, params)
+    response = _fetch(create_request(url, params))
     log.info('Received response headers after %0.2f seconds', time.time() - t)
 
     reader = csv.reader(response)
@@ -317,9 +319,9 @@ def _search_records_for_species(species_lsid):
     Speed could maybe be improved by fetching every page concurrently, instead
     of serially.'''
 
-    url = 'http://biocache.ala.org.au/ws/occurrences/search'
+    url = BIOCACHE + 'ws/occurrences/search'
     params = {
-        'q': _query_for_lsid(species_lsid),
+        'q': q_param_for_lsid(species_lsid),
         'fl': 'id,latitude,longitude',
         'facet': 'off',
         'pageSize': PAGE_SIZE,
@@ -330,7 +332,7 @@ def _search_records_for_species(species_lsid):
         params['startIndex'] = current_page * PAGE_SIZE
 
         t = time.time()
-        response, response_size = _fetch_json(url, params)
+        response, response_size = _fetch_json(create_request(url, params))
         t = time.time() - t
         log.info('Received page %d, sized %0.2fkb in %0.2f secs (%0.2fkb/s)',
                 current_page + 1,
