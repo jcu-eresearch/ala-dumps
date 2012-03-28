@@ -14,6 +14,7 @@ from datetime import datetime
 
 HEX_CHARS = frozenset('1234567890abcdefABCDEF')
 
+
 def all_species_with_lsids():
     for species in db.species.select().execute().fetchall():
         scientific_name = species['scientific_name']
@@ -23,6 +24,7 @@ def all_species_with_lsids():
         else:
             logging.warning("Can't find any LSID for species: " +
                 scientific_name)
+
 
 def uuid_hex_to_binary(uuid_hex):
     r'''
@@ -34,6 +36,7 @@ def uuid_hex_to_binary(uuid_hex):
     uuid_hex = ''.join(c for c in uuid_hex if c in HEX_CHARS)
     assert len(uuid_hex) == 32
     return binascii.unhexlify(uuid_hex)
+
 
 if __name__ == '__main__':
     if '--test' in sys.argv:
@@ -53,14 +56,16 @@ if __name__ == '__main__':
     to_d = datetime.utcnow()
 
     for species, lsid in all_species_with_lsids():
-        logging.info('Getting records for %s (%s)', species['common_name'], lsid)
+        logging.info('Getting records for %s (%s)', species['common_name'],
+                lsid)
+
         num_records = 0
         for record in ala.records_for_species(lsid, 'search', from_d, to_d):
             num_records += 1
             db.occurrences.insert().execute(
                 latitude=record.latitude,
                 longitude=record.longitude,
-                rating='good', #TODO: determine rating
+                rating='good',  # TODO: determine rating
                 species_id=species['id'],
                 source_id=ala_source['id'],
                 source_record_id=uuid_hex_to_binary(record.uuid)

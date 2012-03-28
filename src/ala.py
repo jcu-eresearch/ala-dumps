@@ -33,10 +33,28 @@ class OccurrenceRecord(object):
         self.uuid = None
 
     def __repr__(self):
-        return '<record uuid="{uuid} latLong="{lat}, {lng}" />'.format(
+        return '<record uuid="{uuid}" latLong="{lat}, {lng}" />'.format(
             uuid=self.uuid,
             lat=self.latitude,
             lng=self.longitude)
+
+
+class Species(object):
+    '''Plain old data structure for a species'''
+
+    def __init__(self):
+        self.common_name = None
+        self.scientific_name = None
+        self.lsid = None
+
+    def __repr__(self):
+        # might be None, or contain wierd unicode
+        _asc = lambda s: None if s is None else s.encode('ascii', 'ignore')
+
+        return '<species common="{com}" scientific="{sci}" lsid="{lsid}" />'.\
+            format(com=_asc(self.common_name),
+                   sci=_asc(self.scientific_name),
+                   lsid=self.lsid)
 
 
 def records_for_species(species_lsid, strategy, changed_since=None,
@@ -58,43 +76,76 @@ def records_for_species(species_lsid, strategy, changed_since=None,
         raise ValueError('Invalid strategy: ' + strategy)
 
 
-def species_scientific_name_for_lsid(species_lsid):
-    '''Fetches the scientific name of a species from its LSID'''
+def species_for_lsid(species_lsid):
+    '''Fetches a Species object by its LSID
 
-    guid = urllib.quote(species_lsid)
-    url = BIE + 'species/shortProfile/{0}.json'.format(guid)
+    Can return None if no species is found. A species' LSID tends to change
+    over time, so watch out for this. Will also return None if the lsid
+    is not a species (for example, it might be a genus or subspecies)
+
+    Also, the species common name can be None. Apparently some species don't
+    have common names.
+    '''
+
+    escaped_lsid = urllib.quote(species_lsid)
+    url = BIE + 'species/shortProfile/{0}.json'.format(escaped_lsid)
     info, size = _fetch_json(create_request(url), check_not_empty=False)
     if not info or len(info) == 0:
         return None
+
+    if info['rank'] == 'species':
+        s = Species()
+        s.scientific_name = info['scientificName'].strip()
+        s.lsid = species_lsid
+        if 'commonName' in info:
+            s.common_name = info['commonName'].strip()
+        return s
     else:
-        return info['scientificName']
+        log.warning('lsid is for "%s", not "species": %s',
+                info['rank'], species_lsid)
+        return None
 
 
-def lsid_for_species_scientific_name(scientific_name):
-    '''Fetches the LSID of a species from its scientific name.
+def species_for_scientific_name(scientific_name):
+    '''Fetches a Species object by its scientific name.
 
-    If you were to take the lsid this function returns, and get the species
-    name from the lsid, it may not be the same species name. This is because
-    species names can change, and ALA will map old incorrect names to new
-    correct names.'''
+    The Species object returned may not have the same scientific_name as the
+    argument passed into this function. This is because species names can
+    change and ALA will convert old incorrect names into new correct names.
+    '''
 
     url = BIE + 'ws/guid/' + urllib.quote(scientific_name)
     info, size = _fetch_json(create_request(url), check_not_empty=False)
     if not info or len(info) == 0:
         return None
     else:
-        return info[0]['identifier']
+        assert len(info) == 1
+        return species_for_lsid(info[0]['identifier'])
+
+
+def all_bird_species():
+    '''Generator for Species objects'''
+
+    url = BIOCACHE + 'ws/occurrences/facets/download'
+    response = _fetch(create_request(url, {
+        'q': 'species_group:Birds AND rank:species',
+        'facets': 'taxon_concept_lsid'}))
+
+    reader = csv.reader(response)
+    reader.next()  # skip heading row
+    for row in reader:
+        species = species_for_lsid(row[0])
+        if species is not None:
+            yield species
 
 
 def num_records_for_lsid(lsid):
-    j = _fetch_json(create_request(
-        BIOCACHE + 'ws/occurrences/search',
-        {
+    j = _fetch_json(create_request(BIOCACHE + 'ws/occurrences/search', {
             'q': q_param_for_lsid(lsid),
             'facet': 'off',
-            'pageSize': 0
-        }))
+            'pageSize': 0}))
     return j[0]['totalRecords']
+
 
 def create_request(url, params=None, use_get=True):
     '''URL encodes params and into a GET or POST request'''
@@ -104,63 +155,8 @@ def create_request(url, params=None, use_get=True):
             url += '?' + params
             params = None
 
+    log.debug('Created request for: ' + url)
     return urllib2.Request(url, params)
-
-def _retry(tries=3, delay=2, backoff=2):
-    '''A decorator that retries a function or method until it succeeds (success
-    is when the function completes and no exception is raised).
-
-    delay sets the initial delay in seconds, and backoff sets the factor by
-    which the delay should lengthen after each failure. backoff must be greater
-    than 1, or else it isn't really a backoff. tries must be at least 1, and
-    delay greater than 0.'''
-
-    if backoff <= 1:
-        raise ValueError('backoff must be greater than 1')
-
-    tries = math.floor(tries)
-    if tries < 1:
-        raise ValueError('tries must be >= 1')
-
-    if delay <= 0:
-        raise ValueError('delay must be >= 0')
-
-    def deco_retry(f):
-        def f_retry(*args, **kwargs):
-            mtries, mdelay = tries, delay
-
-            while True:
-                try:
-                    return f(*args, **kwargs)
-                except:
-                    mtries -= 1
-                    if mtries > 0:
-                        time.sleep(mdelay)
-                        mdelay *= backoff
-                    else:
-                        raise
-        return f_retry
-    return deco_retry
-
-@_retry()
-def _fetch_json(request, check_not_empty=True):
-    '''Fetches and parses the JSON at the given url.
-
-    Returns the object parsed from the JSON, and the size (in bytes) of the
-    JSON text that was fetched'''
-
-    response = urllib2.urlopen(request)
-    response_str = response.read()
-    return_value = json.loads(response_str)
-    if check_not_empty and len(return_value) == 0:
-        raise RuntimeError('ALA returned empty response')
-    else:
-        return return_value, len(response_str)
-
-@_retry()
-def _fetch(request):
-    '''Opens the url and returns the result of urllib2.urlopen'''
-    return urllib2.urlopen(request)
 
 
 def q_param_for_lsid(species_lsid, kosher_only=True, changed_since=None,
@@ -211,6 +207,66 @@ def q_param_for_lsid(species_lsid, kosher_only=True, changed_since=None,
         )
         '''.format(lsid=species_lsid, kosher=kosher, changed=changed_between))
 
+
+def _retry(tries=3, delay=2, backoff=2):
+    '''A decorator that retries a function or method until it succeeds (success
+    is when the function completes and no exception is raised).
+
+    delay sets the initial delay in seconds, and backoff sets the factor by
+    which the delay should lengthen after each failure. backoff must be greater
+    than 1, or else it isn't really a backoff. tries must be at least 1, and
+    delay greater than 0.'''
+
+    if backoff <= 1:
+        raise ValueError('backoff must be greater than 1')
+
+    tries = math.floor(tries)
+    if tries < 1:
+        raise ValueError('tries must be >= 1')
+
+    if delay <= 0:
+        raise ValueError('delay must be >= 0')
+
+    def deco_retry(f):
+        def f_retry(*args, **kwargs):
+            mtries, mdelay = tries, delay
+
+            while True:
+                try:
+                    return f(*args, **kwargs)
+                except:
+                    mtries -= 1
+                    if mtries > 0:
+                        time.sleep(mdelay)
+                        mdelay *= backoff
+                    else:
+                        raise
+        return f_retry
+    return deco_retry
+
+
+@_retry()
+def _fetch_json(request, check_not_empty=True):
+    '''Fetches and parses the JSON at the given url.
+
+    Returns the object parsed from the JSON, and the size (in bytes) of the
+    JSON text that was fetched'''
+
+    response = urllib2.urlopen(request)
+    response_str = response.read()
+    return_value = json.loads(response_str)
+    if check_not_empty and len(return_value) == 0:
+        raise RuntimeError('ALA returned empty response')
+    else:
+        return return_value, len(response_str)
+
+
+@_retry()
+def _fetch(request):
+    '''Opens the url and returns the result of urllib2.urlopen'''
+    return urllib2.urlopen(request)
+
+
 def _q_date_range(from_date, to_date):
     '''Formats a start and end date into a date range string for use in ALA
     queries
@@ -220,6 +276,7 @@ def _q_date_range(from_date, to_date):
     '''
 
     return '[{0} TO {1}]'.format(_q_date(from_date), _q_date(to_date))
+
 
 def _q_date(d):
     '''Formats a datetime into a string for use in an ALA date range
@@ -238,6 +295,7 @@ def _q_date(d):
     else:
         assert d.tzinfo is None
         return d.replace(microsecond=0).isoformat('T') + 'Z'
+
 
 def _strip_n_squeeze(q):
     r'''Strips and squeezes whitespace. Completely G rated, I'll have you know.
@@ -382,34 +440,40 @@ def _search_records_for_species(q):
         'q': q,
         'fl': 'id,latitude,longitude',
         'facet': 'off',
-        'pageSize': PAGE_SIZE,
     }
 
-    current_page = 0
-    while True:
-        params['startIndex'] = current_page * PAGE_SIZE
-
-        t = time.time()
-        response, response_size = _fetch_json(create_request(url, params))
-        t = time.time() - t
-        log.info('Received page %d, sized %0.2fkb in %0.2f secs (%0.2fkb/s)',
-                current_page + 1,
-                float(response_size) / 1024.0,
-                t,
-                float(response_size) / 1024.0 / t)
-
-        for occ in response['occurrences']:
+    for page in _json_pages_of_query(url, params, ('totalRecords',)):
+        for occ in page['occurrences']:
             record = OccurrenceRecord()
             record.latitude = occ['decimalLatitude']
             record.longitude = occ['decimalLongitude']
             record.uuid = occ['uuid']
             yield record
 
-        total_pages = math.ceil(
-                float(response['totalRecords']) / float(PAGE_SIZE))
 
-        current_page += 1
-        if current_page >= total_pages:
+def _json_pages_of_query(url, params, total_key_path):
+    assert len(total_key_path) > 0
+
+    if 'pageSize' not in params:
+        params['pageSize'] = PAGE_SIZE
+    page_size = int(params['pageSize'])
+
+    page_idx = 0
+    total_pages = None
+    while True:
+        params['startIndex'] = page_idx * page_size
+        response, response_size = _fetch_json(create_request(url, params))
+        yield response
+
+        # calculate total num pages from response (only once)
+        if total_pages is None:
+            total_results = response
+            for key in total_key_path:
+                total_results = total_results[key]
+            total_pages = math.ceil(float(total_results) / float(page_size))
+
+        page_idx += 1
+        if page_idx >= total_pages:
             break
 
 
