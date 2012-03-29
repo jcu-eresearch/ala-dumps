@@ -128,8 +128,8 @@ def all_bird_species():
 
     url = BIOCACHE + 'ws/occurrences/facets/download'
     response = _fetch(create_request(url, {
-        'q': 'species_group:Birds AND rank:species',
-        'facets': 'taxon_concept_lsid'}))
+        'q': 'species_group:Birds',
+        'facets': 'species_guid'}))
 
     reader = csv.reader(response)
     reader.next()  # skip heading row
@@ -195,10 +195,11 @@ def q_param_for_lsid(species_lsid, kosher_only=True, changed_since=None,
     changed_between = ''
     if changed_since is not None or unchanged_since is not None:
         daterange = _q_date_range(changed_since, unchanged_since)
-        changed_between = 'last_processed_date:' + daterange
+        changed_between = 'last_processed_date:' + daterange + ' AND'
 
     return _strip_n_squeeze('''
         lsid:{lsid} AND
+        (rank:species OR subspecies_name:[* TO *])
         {kosher}
         {changed}
         (

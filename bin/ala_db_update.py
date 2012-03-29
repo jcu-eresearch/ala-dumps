@@ -38,22 +38,65 @@ def uuid_hex_to_binary(uuid_hex):
     return binascii.unhexlify(uuid_hex)
 
 
-if __name__ == '__main__':
-    if '--test' in sys.argv:
-        import doctest
-        doctest.testmod()
-        sys.exit()
+def get_existing_species_from_db():
+    '''Returns a dict mapping scientific name to a db row dict'''
+    all_species = {}
+    for species in db.species.select().execute():
+        all_species[species['scientific_name']] = species;
+    return all_species
 
-    """
-    Does a full occurence record import of every species in the 'species'
-    table using data form ALA.  Doesn't delete existing occurrence records.
-    """
+def get_all_ala_species():
+    '''Returns a dict mapping scientific name to ala.Species object'''
+    all_species = {}
+    for species in ala.all_bird_species():
+        all_species[species.scientific_name] = species
+    return all_species
 
-    logging.root.setLevel(logging.DEBUG)
+def update_all_species_in_db():
+    '''Updates the species table in the database
 
-    ala_source = db.sources.select().execute(name='ala').fetchone()
-    from_d = ala_source['last_import_time']
-    to_d = datetime.utcnow()
+    Checks ALA for new species, and species that have been deleted (e.g. merged
+    into another existing species).
+    '''
+    logging.info('Getting list of species from db...')
+    local = get_existing_species_from_db()
+    local_set = set(local.iterkeys())
+
+    logging.info('Getting list of species from ALA...')
+    remote = get_all_ala_species()
+    remote_set = set(remote.iterkeys())
+
+    logging.info('Deleting species not found at ALA...')
+    deleted_species = local_set - remote_set
+    delete_species_from_db(
+        [s for name, s in local.iteritems() if name in deleted_species])
+
+    logging.info('Adding new species found at ALA...')
+    added_species = remote_set - local_set
+    add_species_to_db(
+        [s for name, s in remote.iteritems() if name in added_species])
+
+
+def add_species_to_db(species):
+    '''species must be an iterable of ala.Species objects'''
+    for s in species:
+        # TODO: here
+        logging.info('Adding new species "%s"', s.scientific_name)
+
+
+def delete_species_from_db(species):
+    '''species must be an iterable of row dicts from the species db table'''
+    for s in  species:
+        # TODO: here
+        logging.info('Deleting species "%s"', s['scientific_name'])
+
+def update_all_occurrences_in_db():
+    '''Updates the occurrences table of the db with data from ALA
+
+    Will use whatever is in the species table of the database, so call
+    update_all_species_in_db before this function.
+    '''
+    return  # TODO: do here properly
 
     for species, lsid in all_species_with_lsids():
         logging.info('Getting records for %s (%s)', species['common_name'],
@@ -73,6 +116,25 @@ if __name__ == '__main__':
 
         if num_records == 0:
             logging.warning('Found 0 records for %s', species['common_name'])
+
+
+if __name__ == '__main__':
+    if '--test' in sys.argv:
+        import doctest
+        doctest.testmod()
+        sys.exit()
+
+    logging.root.setLevel(logging.INFO)
+    logging.basicConfig()
+
+    ala_source = db.sources.select().execute(name='ala').fetchone()
+    from_d = ala_source['last_import_time']
+    to_d = datetime.utcnow()
+
+    if '--skip-species-update' not in sys.argv:
+        update_all_species_in_db()
+
+    update_all_records_in_db()
 
     db.sources.update().\
             where(db.sources.c.id == ala_source['id']).\
