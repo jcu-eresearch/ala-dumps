@@ -132,7 +132,7 @@ def all_bird_species():
               ('fq', 'idxtype:TAXON'))
     total_key_path = ('searchResults', 'totalRecords')
 
-    for page in _json_pages_of_query(url, params, total_key_path):
+    for page in _json_pages(url, params, total_key_path, 'start'):
         for result in page['searchResults']['results']:
             s = Species()
             s.lsid = result['guid']
@@ -456,7 +456,7 @@ def _search_records_for_species(q):
         'facet': 'off',
     }
 
-    for page in _json_pages_of_query(url, params, ('totalRecords',)):
+    for page in _json_pages(url, params, ('totalRecords',), 'startIndex'):
         for occ in page['occurrences']:
             record = OccurrenceRecord()
             record.latitude = occ['decimalLatitude']
@@ -464,18 +464,18 @@ def _search_records_for_species(q):
             record.uuid = occ['uuid']
             yield record
 
-def _json_pages_params_filter(params):
+def _json_pages_params_filter(params, offset_key):
     '''Returns filtered_params, page_size
 
     If 'pageSize' is not present in params, adds it with value = PAGE_SIZE.
-    Strips out any 'startIndex' params. Turns params into a list.
+    Strips out any offset_key ('startIndex') params. Turns params into a list.
 
     >>> params = {'q':'query', 'pageSize': 100, 'startIndex': 10}
-    >>> _json_pages_params_filter(params)
+    >>> _json_pages_params_filter(params, 'startIndex')
     ([('q', 'query'), ('pageSize', 100)], 100)
 
     >>> params = (('fq', 'filter1'), ('fq', 'filter2'))
-    >>> _json_pages_params_filter(params)
+    >>> _json_pages_params_filter(params, 'start')
     ([('fq', 'filter1'), ('fq', 'filter2'), ('pageSize', 1000)], 1000)
     '''
 
@@ -487,7 +487,7 @@ def _json_pages_params_filter(params):
     filtered_params = []
     page_size = None
     for name, value in params:
-        if name == 'startIndex':
+        if name == offset_key:
             continue
         if name == 'pageSize':
             if page_size is None:
@@ -505,15 +505,15 @@ def _json_pages_params_filter(params):
 
 
 
-def _json_pages_of_query(url, params, total_key_path):
+def _json_pages(url, params, total_key_path, offset_key):
     assert len(total_key_path) > 0
 
-    params, page_size = _json_pages_params_filter(params)
+    params, page_size = _json_pages_params_filter(params, offset_key)
 
     page_idx = 0
     total_pages = None
     while True:
-        params.append(('startIndex', page_idx * page_size))
+        params.append((offset_key, page_idx * page_size))
         response = _fetch_json(create_request(url, params))
         yield response
 
@@ -528,7 +528,7 @@ def _json_pages_of_query(url, params, total_key_path):
         if page_idx >= total_pages:
             break
         else:
-            params.pop()  # remove 'startIndex' param
+            params.pop()  # remove offset_key param
 
 
 if __name__ == "__main__":

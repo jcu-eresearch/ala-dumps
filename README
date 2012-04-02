@@ -1,2 +1,4 @@
 Executable scripts are in the 'bin' directory. Non-executable scripts are in
-the 'src' directory. Documentation is in the scripts themselves.
+the 'src' directory.
+
+Run the scripts in the 'bin' directory with the '-h' option for documentation.

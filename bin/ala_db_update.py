@@ -44,17 +44,6 @@ def parse_args():
     return parser.parse_args();
 
 
-def all_species_with_lsids():
-    for species in db.species.select().execute().fetchall():
-        scientific_name = species['scientific_name']
-        lsid = ala.lsid_for_species_scientific_name(scientific_name)
-        if lsid is not None:
-            yield species, lsid
-        else:
-            logging.warning("Can't find any LSID for species: " +
-                scientific_name)
-
-
 def uuid_hex_to_binary(uuid_hex):
     r'''
     >>> a = uuid_hex_to_binary('8ed2d35f-2911-4c10-ad68-587c96b4686e')
@@ -87,13 +76,13 @@ def update_species(add_new=True, delete_old=True):
     Checks ALA for new species, and species that have been deleted (e.g. merged
     into another existing species).
     '''
-    logging.info('Getting list of species from db...')
+    logging.debug('Getting list of species from db...')
     local = get_existing_species_from_db()
-    local_set = set(local.iterkeys())
+    local_set = frozenset(local.iterkeys())
 
-    logging.info('Getting list of species from ALA...')
+    logging.debug('Getting list of species from ALA...')
     remote = get_all_ala_species()
-    remote_set = set(remote.iterkeys())
+    remote_set = frozenset(remote.iterkeys())
 
     if delete_old:
         logging.info('Deleting species not found at ALA...')
@@ -121,32 +110,38 @@ def delete_species_from_db(species):
         # TODO: here
         logging.info('Deleting species "%s"', s['scientific_name'])
 
-def update_occurrences():
+
+def update_occurrences(from_d, to_d, ala_source_id):
     '''Updates the occurrences table of the db with data from ALA
 
     Will use whatever is in the species table of the database, so call
-    update_all_species_in_db before this function.
+    update_species before this function.
     '''
     return  # TODO: do here properly
 
-    for species, lsid in all_species_with_lsids():
-        logging.info('Getting records for %s (%s)', species['common_name'],
-                lsid)
+    for row in db.species.select().execute():
+        species = ala.species_for_scientific_name(row['scientific_name'])
+        if species is None:
+            log.WARNING('Species not found at ALA: %s',
+                        species.scientific_name)
+            continue
+
+        logging.info('Getting records for %s', species.scientific_name)
 
         num_records = 0
-        for record in ala.records_for_species(lsid, 'search', from_d, to_d):
+        for record in ala.records_for_species(species.lsid, 'search', from_d, to_d):
             num_records += 1
             db.occurrences.insert().execute(
                 latitude=record.latitude,
                 longitude=record.longitude,
                 rating='good',  # TODO: determine rating
-                species_id=species['id'],
-                source_id=ala_source['id'],
+                species_id=row['id'],
+                source_id=ala_source_id,
                 source_record_id=uuid_hex_to_binary(record.uuid)
             )
 
         if num_records == 0:
-            logging.warning('Found 0 records for %s', species['common_name'])
+            logging.warning('Found 0 records for %s', species.scientific_name)
 
 
 if __name__ == '__main__':
@@ -169,7 +164,7 @@ if __name__ == '__main__':
     update_species(not args.dont_add_species, not args.dont_delete_species)
 
     if not args.dont_update_occurrences:
-        update_occurences()
+        update_occurrences(from_d, to_d, ala_source['id'])
 
     db.sources.update().\
             where(db.sources.c.id == ala_source['id']).\

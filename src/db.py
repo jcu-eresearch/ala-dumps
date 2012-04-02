@@ -76,7 +76,7 @@ if __name__ == '__main__':
             common_name='Yellow Wagtail')
 
         species.insert().execute(
-            scientific_name='Ninox strenua',
+            scientific_name='Ninox (Rhabdoglaux) strenua',
             common_name='Powerful Owl')
 
         species.insert().execute(
