@@ -1,10 +1,6 @@
 #!/usr/bin/env python
 
-import sys
-import os.path
-srcpath = os.path.realpath(os.path.dirname(__file__) + '/../src')
-sys.path.append(srcpath)
-
+import pathfix
 import string
 import ala
 import db
