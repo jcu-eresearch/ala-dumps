@@ -1,20 +1,29 @@
-#!/usr/bin/python
-
 import sys
 from sqlalchemy import \
-    create_engine, MetaData, Table, Column, ForeignKey, INT, \
+    engine_from_config, MetaData, Table, Column, ForeignKey, INT, \
     PrimaryKeyConstraint, Index
 from sqlalchemy.dialects.mysql import \
     SMALLINT, TINYINT, ENUM, VARCHAR, DATETIME, FLOAT, BINARY, TEXT
 
-engine = create_engine('mysql://ap03:ap03@localhost/ap03')
+engine = None
 metadata = MetaData()
-metadata.bind = engine
+
+
+def connect(engine_config):
+    '''Call this before trying to use anything else'''
+    try:
+        engine = engine_from_config(engine_config, prefix='db.')
+        metadata.bind = engine
+    except:
+        raise RuntimeError('Failed to connect to database. Check the config.')
+
 
 species = Table('species', metadata,
     Column('id', SMALLINT(unsigned=True), primary_key=True),
     Column('scientific_name', VARCHAR(256), nullable=False),
-    Column('common_name', VARCHAR(256), nullable=False)
+    Column('common_name', VARCHAR(256), nullable=True),
+
+    mysql_charset='utf8'
 )
 
 sources = Table('sources', metadata,
@@ -58,31 +67,3 @@ occurrences_ratings_bridge = Table('occurrences_ratings_bridge', metadata,
 
     PrimaryKeyConstraint('occurrence_id', 'rating_id')
 )
-
-
-if __name__ == '__main__':
-    if '--debug-populate' in sys.argv:
-        # This is an old name for 'Cracticus tibicen'. Previously they were
-        # thought to be two separate species, but they are now all classified
-        # as 'Cracticus tibicen'.
-        #
-        # WARNING: ALA has about 350,000 occurrences for this species
-        #species.insert().execute(
-            #scientific_name='Gymnorhina tibicen',
-            #common_name='Australian Magpie')
-
-        species.insert().execute(
-            scientific_name='Motacilla flava',
-            common_name='Yellow Wagtail')
-
-        species.insert().execute(
-            scientific_name='Ninox (Rhabdoglaux) strenua',
-            common_name='Powerful Owl')
-
-        species.insert().execute(
-            scientific_name='Falco (Hierofalco) hypoleucos',
-            common_name='Grey Falcon')
-
-        sources.insert().execute(
-            name='ALA',
-            last_import_time=None)

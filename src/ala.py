@@ -119,7 +119,6 @@ def species_for_scientific_name(scientific_name):
     if not info or len(info) == 0:
         return None
     else:
-        assert len(info) == 1
         return species_for_lsid(info[0]['identifier'])
 
 
@@ -516,6 +515,7 @@ def _json_pages(url, params, total_key_path, offset_key):
         params.append((offset_key, page_idx * page_size))
         response = _fetch_json(create_request(url, params))
         yield response
+
 
         # calculate total num pages from response (only once)
         if total_pages is None:

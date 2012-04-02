@@ -17,8 +17,10 @@
 CREATE TABLE IF NOT EXISTS `species` (
     `id` SMALLINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
     `scientific_name` VARCHAR(256) NOT NULL,
-    `common_name` VARCHAR(256) NOT NULL
-);
+    `common_name` VARCHAR(256) NULL
+        COMMENT "Some species don't have a common name"
+)
+CHARSET=utf8;
 
 
 -- Each row represents a data source of occurrences (e.g. ALA).

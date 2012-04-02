@@ -8,6 +8,7 @@ import db
 import logging
 import binascii
 import argparse
+import json
 from datetime import datetime
 
 HEX_CHARS = frozenset('1234567890abcdefABCDEF')
@@ -41,6 +42,9 @@ def parse_args():
             choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
             default=['INFO'], help='''Determines how much info is printed.''')
 
+    parser.add_argument('config', metavar='config_file', type=str, nargs=1,
+            help='''The path to the JSON config file.''')
+
     return parser.parse_args();
 
 
@@ -59,15 +63,15 @@ def uuid_hex_to_binary(uuid_hex):
 def get_existing_species_from_db():
     '''Returns a dict mapping scientific name to a db row dict'''
     all_species = {}
-    for species in db.species.select().execute():
-        all_species[species['scientific_name']] = species;
+    for row in db.species.select().execute():
+        all_species[row['scientific_name']] = row;
     return all_species
 
 def get_all_ala_species():
     '''Returns a dict mapping scientific name to ala.Species object'''
     all_species = {}
-    for species in ala.all_bird_species():
-        all_species[species.scientific_name] = species
+    for result in ala.all_bird_species():
+        all_species[result.scientific_name] = result
     return all_species
 
 def update_species(add_new=True, delete_old=True):
@@ -76,6 +80,9 @@ def update_species(add_new=True, delete_old=True):
     Checks ALA for new species, and species that have been deleted (e.g. merged
     into another existing species).
     '''
+    if not add_new and not delete_old:
+        return
+
     logging.debug('Getting list of species from db...')
     local = get_existing_species_from_db()
     local_set = frozenset(local.iterkeys())
@@ -85,30 +92,30 @@ def update_species(add_new=True, delete_old=True):
     remote_set = frozenset(remote.iterkeys())
 
     if delete_old:
-        logging.info('Deleting species not found at ALA...')
         deleted_species = local_set - remote_set
-        delete_species_from_db(
-            [s for name, s in local.iteritems() if name in deleted_species])
+        for name, row in local.iteritems():
+            if name in deleted_species:
+                delete_species(row)
 
     if add_new:
-        logging.info('Adding new species found at ALA...')
         added_species = remote_set - local_set
-        add_species_to_db(
-            [s for name, s in remote.iteritems() if name in added_species])
+        for name, species in remote.iteritems():
+            if name in added_species:
+                add_species(species)
 
 
-def add_species_to_db(species):
-    '''species must be an iterable of ala.Species objects'''
-    for s in species:
-        # TODO: here
-        logging.info('Adding new species "%s"', s.scientific_name)
+def add_species(species):
+    '''species must be an ala.Species object'''
+    logging.info('Adding new species "%s"', species.scientific_name)
+    db.species.insert().execute(
+        scientific_name=species.scientific_name,
+        common_name=species.common_name)
 
 
-def delete_species_from_db(species):
-    '''species must be an iterable of row dicts from the species db table'''
-    for s in  species:
-        # TODO: here
-        logging.info('Deleting species "%s"', s['scientific_name'])
+def delete_species(row):
+    '''species must be a row dict from the db'''
+    logging.info('Deleting species "%s"', row['scientific_name'])
+    db.species.delete().where(db.species.c.id == row['id']).execute()
 
 
 def update_occurrences(from_d, to_d, ala_source_id):
@@ -117,7 +124,6 @@ def update_occurrences(from_d, to_d, ala_source_id):
     Will use whatever is in the species table of the database, so call
     update_species before this function.
     '''
-    return  # TODO: do here properly
 
     for row in db.species.select().execute():
         species = ala.species_for_scientific_name(row['scientific_name'])
@@ -156,6 +162,8 @@ if __name__ == '__main__':
         doctest.testmod()
         sys.exit()
 
+    with open(args.config[0], 'rb') as f:
+        db.connect(json.load(f))
 
     ala_source = db.sources.select().execute(name='ALA').fetchone()
     from_d = ala_source['last_import_time']
@@ -165,8 +173,8 @@ if __name__ == '__main__':
 
     if not args.dont_update_occurrences:
         update_occurrences(from_d, to_d, ala_source['id'])
-
-    db.sources.update().\
-            where(db.sources.c.id == ala_source['id']).\
-            values(last_import_time=to_d).\
-            execute()
+        # only set the last_import_time if records were updated
+        db.sources.update().\
+                where(db.sources.c.id == ala_source['id']).\
+                values(last_import_time=to_d).\
+                execute()
