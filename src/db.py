@@ -67,9 +67,9 @@ if __name__ == '__main__':
         # as 'Cracticus tibicen'.
         #
         # WARNING: ALA has about 350,000 occurrences for this species
-        species.insert().execute(
-            scientific_name='Gymnorhina tibicen',
-            common_name='Australian Magpie')
+        #species.insert().execute(
+            #scientific_name='Gymnorhina tibicen',
+            #common_name='Australian Magpie')
 
         species.insert().execute(
             scientific_name='Motacilla flava',
@@ -80,5 +80,9 @@ if __name__ == '__main__':
             common_name='Powerful Owl')
 
         species.insert().execute(
-            scientific_name='Falco hypoleucos',
+            scientific_name='Falco (Hierofalco) hypoleucos',
             common_name='Grey Falcon')
+
+        sources.insert().execute(
+            name='ALA',
+            last_import_time=None)

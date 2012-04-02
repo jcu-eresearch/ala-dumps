@@ -1,14 +1,47 @@
 #!/usr/bin/env python
 
+import sys
 import pathfix
 import string
 import ala
 import db
 import logging
 import binascii
+import argparse
 from datetime import datetime
 
 HEX_CHARS = frozenset('1234567890abcdefABCDEF')
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description='Synchronises local database with ALA')
+
+    parser.add_argument('--dont-add-species', action='store_true',
+        dest='dont_add_species', help='''If new species are found in the ALA
+        data, then don't add them to the database.''')
+
+    parser.add_argument('--dont-delete-species', action='store_true',
+        dest='dont_delete_species', help='''If species in the local database are
+        not present in the ALA data, don't delete them. Species can be removed
+        from ALA when they are merged into another existing species, or if
+        their scientific name changes.''')
+
+    parser.add_argument('--dont-update-occurrences', action='store_true',
+        dest='dont_update_occurrences', help='''If this flag is set, doesn't do
+        anything to the occurrences table. Useful if you only want to update
+        the species table.''')
+
+    parser.add_argument('--doctest', action='store_true', dest='doctest',
+            help='''If this flag is set, doctest is run on the module and no
+            update is performed.''')
+
+    parser.add_argument('--log-level', type=str, nargs=1,
+            choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+            default=['INFO'], help='''Determines how much info is printed.''')
+
+    return parser.parse_args();
 
 
 def all_species_with_lsids():
@@ -48,7 +81,7 @@ def get_all_ala_species():
         all_species[species.scientific_name] = species
     return all_species
 
-def update_all_species_in_db():
+def update_species(add_new=True, delete_old=True):
     '''Updates the species table in the database
 
     Checks ALA for new species, and species that have been deleted (e.g. merged
@@ -62,15 +95,17 @@ def update_all_species_in_db():
     remote = get_all_ala_species()
     remote_set = set(remote.iterkeys())
 
-    logging.info('Deleting species not found at ALA...')
-    deleted_species = local_set - remote_set
-    delete_species_from_db(
-        [s for name, s in local.iteritems() if name in deleted_species])
+    if delete_old:
+        logging.info('Deleting species not found at ALA...')
+        deleted_species = local_set - remote_set
+        delete_species_from_db(
+            [s for name, s in local.iteritems() if name in deleted_species])
 
-    logging.info('Adding new species found at ALA...')
-    added_species = remote_set - local_set
-    add_species_to_db(
-        [s for name, s in remote.iteritems() if name in added_species])
+    if add_new:
+        logging.info('Adding new species found at ALA...')
+        added_species = remote_set - local_set
+        add_species_to_db(
+            [s for name, s in remote.iteritems() if name in added_species])
 
 
 def add_species_to_db(species):
@@ -86,7 +121,7 @@ def delete_species_from_db(species):
         # TODO: here
         logging.info('Deleting species "%s"', s['scientific_name'])
 
-def update_all_occurrences_in_db():
+def update_occurrences():
     '''Updates the occurrences table of the db with data from ALA
 
     Will use whatever is in the species table of the database, so call
@@ -115,22 +150,26 @@ def update_all_occurrences_in_db():
 
 
 if __name__ == '__main__':
-    if '--test' in sys.argv:
+    args = parse_args()
+
+    logging.basicConfig()
+    logging.root.setLevel(logging.__dict__[args.log_level[0]])
+
+    if args.doctest:
+        print 'Doctesting...'
         import doctest
         doctest.testmod()
         sys.exit()
 
-    logging.root.setLevel(logging.INFO)
-    logging.basicConfig()
 
-    ala_source = db.sources.select().execute(name='ala').fetchone()
+    ala_source = db.sources.select().execute(name='ALA').fetchone()
     from_d = ala_source['last_import_time']
     to_d = datetime.utcnow()
 
-    if '--skip-species-update' not in sys.argv:
-        update_all_species_in_db()
+    update_species(not args.dont_add_species, not args.dont_delete_species)
 
-    update_all_records_in_db()
+    if not args.dont_update_occurrences:
+        update_occurences()
 
     db.sources.update().\
             where(db.sources.c.id == ala_source['id']).\
