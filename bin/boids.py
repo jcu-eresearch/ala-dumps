@@ -12,5 +12,4 @@ if __name__ == '__main__':
     logging.basicConfig()
     logging.root.setLevel(logging.INFO)
     for species in ala.all_bird_species():
-        species.lsid = None
         print species

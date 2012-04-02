@@ -89,7 +89,7 @@ def species_for_lsid(species_lsid):
 
     escaped_lsid = urllib.quote(species_lsid)
     url = BIE + 'species/shortProfile/{0}.json'.format(escaped_lsid)
-    info, size = _fetch_json(create_request(url), check_not_empty=False)
+    info = _fetch_json(create_request(url), check_not_empty=False)
     if not info or len(info) == 0:
         return None
 
@@ -115,7 +115,7 @@ def species_for_scientific_name(scientific_name):
     '''
 
     url = BIE + 'ws/guid/' + urllib.quote(scientific_name)
-    info, size = _fetch_json(create_request(url), check_not_empty=False)
+    info = _fetch_json(create_request(url), check_not_empty=False)
     if not info or len(info) == 0:
         return None
     else:
@@ -126,17 +126,21 @@ def species_for_scientific_name(scientific_name):
 def all_bird_species():
     '''Generator for Species objects'''
 
-    url = BIOCACHE + 'ws/occurrences/facets/download'
-    response = _fetch(create_request(url, {
-        'q': 'species_group:Birds',
-        'facets': 'species_guid'}))
+    url = BIE + 'search.json'
+    params = (('fq', 'speciesGroup:Birds'),
+              ('fq', 'rank:species'),
+              ('fq', 'idxtype:TAXON'))
+    total_key_path = ('searchResults', 'totalRecords')
 
-    reader = csv.reader(response)
-    reader.next()  # skip heading row
-    for row in reader:
-        species = species_for_lsid(row[0])
-        if species is not None:
-            yield species
+    for page in _json_pages_of_query(url, params, total_key_path):
+        for result in page['searchResults']['results']:
+            s = Species()
+            s.lsid = result['guid']
+            s.scientific_name = result['nameComplete'].strip()
+            if result['commonNameSingle'] is not None:
+                s.common_name = result['commonNameSingle'].strip()
+
+            yield s
 
 
 def num_records_for_lsid(lsid):
@@ -144,7 +148,7 @@ def num_records_for_lsid(lsid):
             'q': q_param_for_lsid(lsid),
             'facet': 'off',
             'pageSize': 0}))
-    return j[0]['totalRecords']
+    return j['totalRecords']
 
 
 def create_request(url, params=None, use_get=True):
@@ -253,13 +257,22 @@ def _fetch_json(request, check_not_empty=True):
     Returns the object parsed from the JSON, and the size (in bytes) of the
     JSON text that was fetched'''
 
+    start_time = time.time()
     response = urllib2.urlopen(request)
+    response_time = time.time()
     response_str = response.read()
+    end_time = time.time()
+
+    log.debug('Loaded JSON at %f kb/s. %f before response + %f download time.',
+            (len(response_str) / 1024.0) / (end_time - start_time),
+            response_time - start_time,
+            end_time - response_time)
+
     return_value = json.loads(response_str)
     if check_not_empty and len(return_value) == 0:
         raise RuntimeError('ALA returned empty response')
     else:
-        return return_value, len(response_str)
+        return return_value
 
 
 @_retry()
@@ -451,19 +464,57 @@ def _search_records_for_species(q):
             record.uuid = occ['uuid']
             yield record
 
+def _json_pages_params_filter(params):
+    '''Returns filtered_params, page_size
+
+    If 'pageSize' is not present in params, adds it with value = PAGE_SIZE.
+    Strips out any 'startIndex' params. Turns params into a list.
+
+    >>> params = {'q':'query', 'pageSize': 100, 'startIndex': 10}
+    >>> _json_pages_params_filter(params)
+    ([('q', 'query'), ('pageSize', 100)], 100)
+
+    >>> params = (('fq', 'filter1'), ('fq', 'filter2'))
+    >>> _json_pages_params_filter(params)
+    ([('fq', 'filter1'), ('fq', 'filter2'), ('pageSize', 1000)], 1000)
+    '''
+
+    # convert to iterable
+    if isinstance(params, dict):
+        params = params.iteritems()
+
+    # filter out 'startIndex' and see if 'pageSize' is set
+    filtered_params = []
+    page_size = None
+    for name, value in params:
+        if name == 'startIndex':
+            continue
+        if name == 'pageSize':
+            if page_size is None:
+                page_size = value
+            else:
+                raise RuntimeError('"pageSize" param defined twice (or more)')
+        filtered_params.append((name, value))
+
+    # add 'pageSize' if not present
+    if page_size is None:
+        filtered_params.append(('pageSize', PAGE_SIZE))
+        page_size = PAGE_SIZE
+
+    return filtered_params, int(page_size);
+
+
 
 def _json_pages_of_query(url, params, total_key_path):
     assert len(total_key_path) > 0
 
-    if 'pageSize' not in params:
-        params['pageSize'] = PAGE_SIZE
-    page_size = int(params['pageSize'])
+    params, page_size = _json_pages_params_filter(params)
 
     page_idx = 0
     total_pages = None
     while True:
-        params['startIndex'] = page_idx * page_size
-        response, response_size = _fetch_json(create_request(url, params))
+        params.append(('startIndex', page_idx * page_size))
+        response = _fetch_json(create_request(url, params))
         yield response
 
         # calculate total num pages from response (only once)
@@ -476,8 +527,11 @@ def _json_pages_of_query(url, params, total_key_path):
         page_idx += 1
         if page_idx >= total_pages:
             break
+        else:
+            params.pop()  # remove 'startIndex' param
 
 
 if __name__ == "__main__":
+    print 'Doctesting...'
     import doctest
     doctest.testmod()
