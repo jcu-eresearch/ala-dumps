@@ -9,6 +9,7 @@ import logging
 import binascii
 import argparse
 import json
+import multiprocessing as mp
 from datetime import datetime
 from sqlalchemy import func, select
 
@@ -124,24 +125,69 @@ def update_occurrences(from_d, to_d, ala_source_id):
 
     Will use whatever is in the species table of the database, so call
     update_species before this function.
+
+    Uses a pool of processes to fetch occurrence records. The subprocesses feed
+    the records into a queue which the original process reads and then updates
+    the database. This should let the main process access the database at full
+    speed while the subprocesses are waiting for more records to arrive over
+    the network.
     '''
 
+    record_q = mp.Queue()
+    pool = mp.Pool(8, async_init, [record_q])
+    active_workers = 0
+
+    # fill the pool full with every species
     for row in db.species.select().execute():
-        species = ala.species_for_scientific_name(row['scientific_name'])
-        if species is None:
-            logging.WARNING('Species not found at ALA: %s',
-                species.scientific_name)
-            continue
+        pool.apply_async(async_record_fetch,
+                [row['scientific_name'], row['id']])
+        active_workers += 1
 
-        logging.info('Getting records for %s', species.scientific_name)
+    pool.close()
 
-        num_records = 0
-        for record in ala.records_for_species(species.lsid, 'search', from_d, to_d):
-            num_records += 1
-            update_occurrence(record, ala_source_id, row['id'])
+    # read out the records untill all the subprocesses are finished
+    while active_workers > 0:
+        record = record_q.get()
+        if record is None:
+            active_workers -= 1
+        else:
+            update_occurrence(record, ala_source_id, record.species_id)
 
-        if num_records == 0:
-            logging.warning('Found 0 records for %s', species.scientific_name)
+    # all the subprocesses should be dead by now
+    pool.join()
+
+
+def async_init(output_q):
+    '''Called when a subprocess is started'''
+    async_record_fetch.output_q = output_q
+    async_record_fetch.log = mp.log_to_stderr()
+
+
+def async_record_fetch(scientific_name, species_id):
+    '''Fetches records for the given scientific name and puts them in output_q
+
+    Puts None in the queue to indicate that it is finished. Each record also
+    has an extra species_id attribute attached which corresponds with the
+    species_id argument passed to this function.
+    '''
+
+    species = ala.species_for_scientific_name(scientific_name)
+    if species is None:
+        async_record_fetch.log.warning('Species not found at ALA: %s', scientific_name)
+        return
+
+    num_records = 0
+    for record in ala.records_for_species(species.lsid, 'search'):
+        record.species_id = species_id
+        async_record_fetch.output_q.put(record)
+        num_records += 1
+
+    if num_records > 0:
+        async_record_fetch.log.info(
+            'Found %d records for "%s"', num_records, scientific_name)
+
+    async_record_fetch.output_q.put(None)
+
 
 
 def update_occurrence(occurrence, ala_source_id, species_id):
@@ -155,8 +201,8 @@ def update_occurrence(occurrence, ala_source_id, species_id):
     already_exists = db.engine.execute(s).scalar() > 0
     if already_exists:
         db.occurrences.update()\
-            .where(source_id=ala_source_id)\
-            .where(source_record_id=record_id_binary)\
+            .where(db.occurrences.c.source_id == ala_source_id)\
+            .where(db.occurrences.c.source_record_id == record_id_binary)\
             .execute(
                 latitude=occurrence.latitude,
                 longitude=occurrence.longitude,
@@ -187,8 +233,6 @@ def update():
                 where(db.sources.c.id == ala_source['id']).\
                 values(last_import_time=to_d).\
                 execute()
-
-    logging.info("Finished at %s", str(datetime.utcnow()))
 
 
 if __name__ == '__main__':
