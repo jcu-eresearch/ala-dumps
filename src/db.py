@@ -12,6 +12,7 @@ metadata = MetaData()
 def connect(engine_config):
     '''Call this before trying to use anything else'''
     try:
+        global engine
         engine = engine_from_config(engine_config, prefix='db.')
         metadata.bind = engine
     except:
@@ -36,7 +37,8 @@ occurrences = Table('occurrences', metadata,
     Column('id', INT(unsigned=True), primary_key=True),
     Column('latitude', FLOAT(), nullable=False),
     Column('longitude', FLOAT(), nullable=False),
-    Column('rating', ENUM('good', 'suspect', 'bad'), nullable=False),
+    Column('rating', ENUM('known valid', 'assumed valid', 'known invalid',
+        'assumed invalid'), nullable=False),
     Column('species_id', SMALLINT(unsigned=True), ForeignKey('species.id'),
         nullable=False),
     Column('source_id', TINYINT(unsigned=True), ForeignKey('sources.id'),
@@ -58,7 +60,8 @@ ratings = Table('ratings', metadata,
     Column('user_id', INT(unsigned=True), ForeignKey('users.id'),
         nullable=False),
     Column('comment', TEXT(), nullable=False),
-    Column('rating', ENUM('good', 'suspect', 'bad'), nullable=False)
+    Column('rating', ENUM('known valid', 'assumed valid', 'known invalid',
+        'assumed invalid'), nullable=False)
 )
 
 occurrences_ratings_bridge = Table('occurrences_ratings_bridge', metadata,

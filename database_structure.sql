@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS `occurrences` (
     `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
     `latitude` FLOAT NOT NULL,
     `longitude` FLOAT NOT NULL,
-    `rating` ENUM('good','suspect','bad') NOT NULL,
+    `rating` ENUM('known valid', 'assumed valid', 'known invalid', 'assumed invalid') NOT NULL,
     `species_id` SMALLINT UNSIGNED NOT NULL
         COMMENT 'foreign key to species.id',
     `source_id` TINYINT UNSIGNED NOT NULL
@@ -56,7 +56,8 @@ CREATE TABLE IF NOT EXISTS `occurrences` (
     `source_record_id` BINARY(16) NULL
         COMMENT 'the id of the record as obtained from the source (e.g. the uuid from ALA).',
 
-    INDEX `idx_species_id` (species_id)
+    INDEX `idx_species_id` (species_id),
+    UNIQUE INDEX `idx_source_record` (source_id, source_record_id)
 )
 -- MyISAM should theoretically be faster than InnoDB
 -- for tables that are not updated or inserted frequently.
@@ -84,7 +85,7 @@ CREATE TABLE IF NOT EXISTS `ratings` (
         COMMENT 'foreign key into users.id',
     `comment` TEXT NOT NULL
         COMMENT 'additional free-form comment supplied by the user',
-    `rating` ENUM('good', 'suspect', 'bad') NOT NULL
+    `rating` ENUM('known valid', 'assumed valid', 'known invalid', 'assumed invalid') NOT NULL
         COMMENT 'user supplied rating. same enum as "occurrences.rating"'
 );
 
