@@ -1,9 +1,10 @@
 import sys
 from sqlalchemy import \
-    engine_from_config, MetaData, Table, Column, ForeignKey, INT, \
+    engine_from_config, MetaData, Table, Column, ForeignKey, \
     PrimaryKeyConstraint, Index
 from sqlalchemy.dialects.mysql import \
-    SMALLINT, TINYINT, ENUM, VARCHAR, DATETIME, FLOAT, BINARY, TEXT
+    SMALLINT, TINYINT, ENUM, VARCHAR, DATETIME, FLOAT, BINARY, TEXT, \
+    INTEGER
 
 engine = None
 metadata = MetaData()
@@ -11,12 +12,9 @@ metadata = MetaData()
 
 def connect(engine_config):
     '''Call this before trying to use anything else'''
-    try:
-        global engine
-        engine = engine_from_config(engine_config, prefix='db.')
-        metadata.bind = engine
-    except:
-        raise RuntimeError('Failed to connect to database. Check the config.')
+    global engine
+    engine = engine_from_config(engine_config, prefix='db.')
+    metadata.bind = engine
 
 
 species = Table('species', metadata,
@@ -34,7 +32,7 @@ sources = Table('sources', metadata,
 )
 
 occurrences = Table('occurrences', metadata,
-    Column('id', INT(unsigned=True), primary_key=True),
+    Column('id', INTEGER(unsigned=True), primary_key=True),
     Column('latitude', FLOAT(), nullable=False),
     Column('longitude', FLOAT(), nullable=False),
     Column('rating', ENUM('known valid', 'assumed valid', 'known invalid',
@@ -51,13 +49,13 @@ occurrences = Table('occurrences', metadata,
 )
 
 users = Table('users', metadata,
-    Column('id', INT(unsigned=True), primary_key=True),
+    Column('id', INTEGER(unsigned=True), primary_key=True),
     Column('email', VARCHAR(256), nullable=False)
 )
 
 ratings = Table('ratings', metadata,
-    Column('id', INT(unsigned=True), primary_key=True),
-    Column('user_id', INT(unsigned=True), ForeignKey('users.id'),
+    Column('id', INTEGER(unsigned=True), primary_key=True),
+    Column('user_id', INTEGER(unsigned=True), ForeignKey('users.id'),
         nullable=False),
     Column('comment', TEXT(), nullable=False),
     Column('rating', ENUM('known valid', 'assumed valid', 'known invalid',
@@ -65,8 +63,8 @@ ratings = Table('ratings', metadata,
 )
 
 occurrences_ratings_bridge = Table('occurrences_ratings_bridge', metadata,
-    Column('occurrence_id', INT(unsigned=True), nullable=False),
-    Column('rating_id', INT(unsigned=True), nullable=False),
+    Column('occurrence_id', INTEGER(unsigned=True), nullable=False),
+    Column('rating_id', INTEGER(unsigned=True), nullable=False),
 
     PrimaryKeyConstraint('occurrence_id', 'rating_id')
 )

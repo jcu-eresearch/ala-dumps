@@ -12,7 +12,7 @@ if '-h' in sys.argv or len(sys.argv) == 1:
     sys.exit()
 
 # connect
-with open('config.example.json', 'rb') as f:
+with open('config.json', 'rb') as f:
     db.connect(json.load(f))
 
 # wipe
