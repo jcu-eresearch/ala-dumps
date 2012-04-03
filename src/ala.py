@@ -189,6 +189,8 @@ def q_param_for_lsid(species_lsid, kosher_only=True, changed_since=None,
         first_loaded_date
         last_load_date
         last_assertion_date
+
+    TODO: remove occurrences that happened before 1950?
     '''
 
     kosher = ''

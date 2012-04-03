@@ -10,6 +10,7 @@ import binascii
 import argparse
 import json
 from datetime import datetime
+from sqlalchemy import func, select
 
 HEX_CHARS = frozenset('1234567890abcdefABCDEF')
 
@@ -128,8 +129,8 @@ def update_occurrences(from_d, to_d, ala_source_id):
     for row in db.species.select().execute():
         species = ala.species_for_scientific_name(row['scientific_name'])
         if species is None:
-            log.WARNING('Species not found at ALA: %s',
-                        species.scientific_name)
+            logging.WARNING('Species not found at ALA: %s',
+                species.scientific_name)
             continue
 
         logging.info('Getting records for %s', species.scientific_name)
@@ -137,17 +138,57 @@ def update_occurrences(from_d, to_d, ala_source_id):
         num_records = 0
         for record in ala.records_for_species(species.lsid, 'search', from_d, to_d):
             num_records += 1
-            db.occurrences.insert().execute(
-                latitude=record.latitude,
-                longitude=record.longitude,
-                rating='good',  # TODO: determine rating
-                species_id=row['id'],
-                source_id=ala_source_id,
-                source_record_id=uuid_hex_to_binary(record.uuid)
-            )
+            update_occurrence(record, ala_source_id, row['id'])
 
         if num_records == 0:
             logging.warning('Found 0 records for %s', species.scientific_name)
+
+
+def update_occurrence(occurrence, ala_source_id, species_id):
+    '''Adds/modifies a single record'''
+    record_id_binary = uuid_hex_to_binary(occurrence.uuid)
+    s = select([func.count('*')],
+        # where
+        (db.occurrences.c.source_id == ala_source_id)
+        & (db.occurrences.c.source_record_id == record_id_binary)
+    )
+    already_exists = db.engine.execute(s).scalar() > 0
+    if already_exists:
+        db.occurrences.update()\
+            .where(source_id=ala_source_id)\
+            .where(source_record_id=record_id_binary)\
+            .execute(
+                latitude=occurrence.latitude,
+                longitude=occurrence.longitude,
+                rating='assumed valid', # TODO: determine rating
+                species_id=species_id
+            )
+    else:
+        db.occurrences.insert().execute(
+            latitude=occurrence.latitude,
+            longitude=occurrence.longitude,
+            rating='assumed valid',  # TODO: determine rating
+            species_id=species_id,
+            source_id=ala_source_id,
+            source_record_id=record_id_binary
+        )
+
+def update():
+    ala_source = db.sources.select().execute(name='ALA').fetchone()
+    from_d = ala_source['last_import_time']
+    to_d = datetime.utcnow()
+
+    update_species(not args.dont_add_species, not args.dont_delete_species)
+
+    if not args.dont_update_occurrences:
+        update_occurrences(from_d, to_d, ala_source['id'])
+        # only set the last_import_time if records were updated
+        db.sources.update().\
+                where(db.sources.c.id == ala_source['id']).\
+                values(last_import_time=to_d).\
+                execute()
+
+    logging.info("Finished at %s", str(datetime.utcnow()))
 
 
 if __name__ == '__main__':
@@ -165,16 +206,10 @@ if __name__ == '__main__':
     with open(args.config[0], 'rb') as f:
         db.connect(json.load(f))
 
-    ala_source = db.sources.select().execute(name='ALA').fetchone()
-    from_d = ala_source['last_import_time']
-    to_d = datetime.utcnow()
+    logging.info("Started at %s", str(datetime.now()))
+    try:
+        update()
+    finally:
+        logging.info("Ended at %s", str(datetime.now()))
 
-    update_species(not args.dont_add_species, not args.dont_delete_species)
 
-    if not args.dont_update_occurrences:
-        update_occurrences(from_d, to_d, ala_source['id'])
-        # only set the last_import_time if records were updated
-        db.sources.update().\
-                where(db.sources.c.id == ala_source['id']).\
-                values(last_import_time=to_d).\
-                execute()
