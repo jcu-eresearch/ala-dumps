@@ -6,9 +6,14 @@ import json
 import sys
 
 # make sure this isn't run accidentally
-if '-h' in sys.argv or len(sys.argv) == 1:
-    print "Wipes the database clean and insert some debugging rows."
-    print "Don't try use this in production!"
+if '--go' not in sys.argv:
+    print
+    print "Wipes the database clean and inserts some debug data."
+    print "Don't use this in production!"
+    print
+    print "Usage:"
+    print "\t{0} --go".format(sys.argv[0])
+    print
     sys.exit()
 
 # connect
