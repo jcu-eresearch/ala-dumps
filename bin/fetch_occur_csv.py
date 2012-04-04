@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import sys
 import pathfix
 import csv
 import string
@@ -79,8 +80,8 @@ def spp_code_for_species_name(species_name):
 
 
 def write_csv_for_species_lsid(species_lsid, strategy):
-    scientific_name = ala.species_scientific_name_for_lsid(species_lsid)
-    sppCode = spp_code_for_species_name(scientific_name)
+    species = ala.species_for_lsid(species_lsid)
+    sppCode = spp_code_for_species_name(species.scientific_name)
 
     t = time.time()
     num_records = 0
