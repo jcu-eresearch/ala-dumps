@@ -13,6 +13,7 @@ import shutil
 import zipfile
 import time
 import logging
+import uuid
 from datetime import datetime
 
 #occurrence records per request for 'search' strategy
@@ -462,7 +463,7 @@ def _search_records_for_species(q):
             record = OccurrenceRecord()
             record.latitude = occ['decimalLatitude']
             record.longitude = occ['decimalLongitude']
-            record.uuid = occ['uuid']
+            record.uuid = uuid.UUID(occ['uuid'])
             yield record
 
 def _json_pages_params_filter(params, offset_key):
