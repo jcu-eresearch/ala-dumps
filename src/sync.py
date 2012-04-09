@@ -135,7 +135,7 @@ class Syncer:
         speed while the subprocesses are waiting for more records to arrive
         over the network.'''
 
-        record_q = multiprocessing.Queue()
+        record_q = multiprocessing.Queue(10000)
         pool = multiprocessing.Pool(8, _mp_init, [record_q])
         active_workers = 0
 
