@@ -65,7 +65,9 @@ def update_occurrences(syncer, from_d, to_d, ala_source_id):
     '''Updates the occurrences table of the db with data from ALA '''
 
     for occurrence in syncer.occurrences_changed_since(from_d):
-        syncer.add_or_update_occurrence(occurrence, occurrence.species_id)
+        syncer.upsert_occurrence(occurrence, occurrence.species_id)
+
+    syncer.flush_upserts()
 
 
 def update():

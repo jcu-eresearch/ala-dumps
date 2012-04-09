@@ -2,6 +2,7 @@ import db
 import ala
 import logging
 import multiprocessing
+import binascii
 from sqlalchemy import func, select
 
 log = logging.getLogger(__name__)
@@ -21,6 +22,7 @@ class Syncer:
             raise RuntimeError('ALA row missing from sources table in db')
 
         self.source_row_id = row['id']
+        self.cached_upserts = []
 
     def local_species(self):
         '''Returns all species in the local db in a dict. Scientific name is the
@@ -75,44 +77,49 @@ class Syncer:
         log.info('Deleting species "%s"', row['scientific_name'])
         db.species.delete().where(db.species.c.id == row['id']).execute()
 
-    def add_or_update_occurrence(self, occurrence, species_id):
-        '''Looks up where `occurrence` (an ala.OccurrenceRecord object) already
-        exists in the local db. If it does, the db row is updated with the
-        information in `occurrence`. If it does not exist, a new row is
-        added.
+    def upsert_occurrence(self, occurrence, species_id):
+        '''Looks up whether `occurrence` (an ala.OccurrenceRecord object)
+        already exists in the local db. If it does, the db row is updated with
+        the information in `occurrence`. If it does not exist, a new row is
+        inserted.
 
         `species_id` must be supplied as an argument because it is not
-        obtainable from `occurrence`'''
+        obtainable from `occurrence`
 
-        s = select(
-            [func.count('*')],
-            # where
-            (db.occurrences.c.source_id == self.source_row_id)
-            & (db.occurrences.c.source_record_id == occurrence.uuid.bytes)
-        )
+        The inserts/updates are cached for performance reasons. The cache is
+        flushed every 1000 occurrences. YOU MUST CALL `flush_upserts` AFTER YOU
+        HAVE CALLED THIS METHOD FOR THE FINAL TIME.'''
 
-        already_exists = db.engine.execute(s).scalar() > 0
+        if len(self.cached_upserts) > 1000:
+            self.flush_upserts()
 
-        # TODO: will be faster if I use INSERT ... ON DUPLICATE KEY UPDATE
-        #       sql instead of two separate queries
-        if already_exists:
-            db.occurrences.update()\
-                .where(db.occurrences.c.source_id == self.source_row_id)\
-                .where(db.occurrences.c.source_record_id == occurrence.uuid.bytes)\
-                .execute(
-                    latitude=occurrence.latitude,
-                    longitude=occurrence.longitude,
-                    rating='assumed valid', # TODO: determine rating
-                    species_id=species_id
-                )
-        else:
-            db.occurrences.insert().execute(
-                latitude=occurrence.latitude,
-                longitude=occurrence.longitude,
-                rating='assumed valid',  # TODO: determine rating
-                species_id=species_id,
-                source_id=self.source_row_id,
-                source_record_id=occurrence.uuid.bytes)
+        # these should be escaped strings ready for insertion into the SQL
+        cols = (str(float(occurrence.latitude)),
+                str(float(occurrence.longitude)),
+                '"assumed valid"',  # TODO: determine rating
+                str(int(species_id)),
+                str(int(self.source_row_id)),
+                _mysql_encode_binary(occurrence.uuid.bytes))
+
+        self.cached_upserts.append('(' + ','.join(cols) + ')')
+
+    def flush_upserts(self):
+        query = '''INSERT INTO OCCURRENCES(
+                        latitude, longitude, rating, species_id, source_id,
+                        source_record_id)
+
+                   VALUES
+                        {0}
+
+                   ON DUPLICATE KEY UPDATE
+                        latitude=VALUES(latitude),
+                        longitude=VALUES(longitude),
+                        rating=VALUES(rating),
+                        species_id=VALUES(species_id)
+                '''.format(','.join(self.cached_upserts))
+
+        db.engine.execute(query)
+
 
     def occurrences_changed_since(self, since_date):
         '''Generator for ala.OccurrenceRecord objects.
@@ -163,19 +170,32 @@ def _mp_fetch(species_sname, species_id, since_date):
 
     Adds a `species_id` attribute to each species object set to the argument
     given to this function.'''
-
-    species = ala.species_for_scientific_name(species_sname)
-    if species is not None:
-        num_records = 0
-        for record in ala.records_for_species(species.lsid, 'search', since_date):
-            record.species_id = species_id
-            _mp_init.record_q.put(record)
-            num_records += 1
-
-        if num_records > 0:
-            _mp_init.log.info('Found %d records for "%s"',
-                num_records, species_sname)
-    else:
-        _mp_init.log.warning('Species not found at ALA: %s', species_sname)
+    try:
+        _mp_fetch_inner(species_sname, species_id, since_date)
+    except Exception, e:
+        _mp_init.log.critical('mp process failed with expection: ' + str(e))
 
     _mp_init.record_q.put(None)
+
+def _mp_fetch_inner(species_sname, species_id, since_date):
+    species = ala.species_for_scientific_name(species_sname)
+    if species is None:
+        _mp_init.log.warning('Species not found at ALA: %s', species_sname)
+        return
+
+    num_records = 0
+    for record in ala.records_for_species(species.lsid, 'search', since_date):
+        record.species_id = species_id
+        _mp_init.record_q.put(record)
+        num_records += 1
+
+    if num_records > 0:
+        _mp_init.log.info('Found %d records for "%s"',
+            num_records, species_sname)
+
+def _mysql_encode_binary(binstr):
+    '''
+    >>> _mysql_encode_binary('hello')
+    "x'68656c6c6f'"
+    '''
+    return "x'" + binascii.hexlify(binstr) + "'"
