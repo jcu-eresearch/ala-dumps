@@ -104,7 +104,7 @@ class Syncer:
         self.cached_upserts.append('(' + ','.join(cols) + ')')
 
     def flush_upserts(self):
-        query = '''INSERT INTO OCCURRENCES(
+        query = '''INSERT INTO occurrences(
                         latitude, longitude, rating, species_id, source_id,
                         source_record_id)
 
@@ -119,6 +119,8 @@ class Syncer:
                 '''.format(','.join(self.cached_upserts))
 
         db.engine.execute(query)
+
+        self.cached_upserts = []
 
 
     def occurrences_changed_since(self, since_date):
