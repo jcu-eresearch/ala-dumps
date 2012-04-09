@@ -110,10 +110,21 @@ def species_for_lsid(species_lsid):
 def species_for_scientific_name(scientific_name):
     '''Fetches a Species object by its scientific name.
 
+    scientific_name is in the format "genus (subgenus) species" where the
+    subgenus is optional. For example "Falco (heirofalco) hypoleucos" or just
+    "Falco hypoleucos".
+
     The Species object returned may not have the same scientific_name as the
     argument passed into this function. This is because species names can
     change and ALA will convert old incorrect names into new correct names.
     '''
+
+    # the web service behaviour changed (frowny face). Might need a to use
+    # a different web service that acceps the genus/species separately instead
+    # of as one string. The fix for now is just stripping the parenthesis off
+    # the subgenus
+    scientific_name = scientific_name.replace('(', '');
+    scientific_name = scientific_name.replace(')', '');
 
     url = BIE + 'ws/guid/' + urllib.quote(scientific_name)
     info = _fetch_json(create_request(url), check_not_empty=False)

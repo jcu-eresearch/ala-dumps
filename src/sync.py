@@ -59,17 +59,18 @@ class Syncer:
         return (added, deleted)
 
 
-    def add_species(self, s):
-        '''Adds `s` to the local db, where `s` is an ala.Species object'''
+    def add_species(self, species):
+        '''Adds `species` to the local db, where `s` is an ala.Species
+        object'''
 
         log.info('Adding new species "%s"', species.scientific_name)
         db.species.insert().execute(
             scientific_name=species.scientific_name,
             common_name=species.common_name)
 
-    def delete_species(self, s):
-        '''Deletes `s` from the local db, where `s` is a row from the db.species
-        table'''
+    def delete_species(self, row):
+        '''Deletes `row` from the local db, where `s` is a row from the
+        db.species table'''
 
         log.info('Deleting species "%s"', row['scientific_name'])
         db.species.delete().where(db.species.c.id == row['id']).execute()
