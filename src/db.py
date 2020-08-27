@@ -31,7 +31,7 @@ if __name__ == '__main__':
 
     if '--debug-populate' in sys.argv:
         # This is an old name for 'Cracticus tibicen', which is the Australian
-        # Mapie. Previously they were thought to be two separate species, but
+        # Magpie. Previously they were thought to be two separate species, but
         # they are now all classified as 'Cracticus tibicen'
         #
         # WARNING: ALA has about 350,000 records for 'Cracticus tibicen'
